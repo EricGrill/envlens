@@ -63,10 +63,7 @@ fn variable_lines(
         None => lines.push(clipped_line("effective: <missing>", inner_width)),
     }
     if app.expanded.contains(&variable.key) {
-        lines.push(clipped_line(
-            "expanded: showing every occurrence",
-            inner_width,
-        ));
+        lines.push(clipped_line("expanded: occurrence details", inner_width));
     }
     lines.push(Line::from(""));
     lines.push(clipped_line("occurrences:", inner_width));
