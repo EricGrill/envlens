@@ -90,6 +90,11 @@ pub fn scan(root: &Path, extra_ignores: &[String]) -> Vec<Discovered> {
         .build();
 
     let mut discovered: Vec<Discovered> = walker
+        // Deliberate for v0.1: silently skip entries the walker couldn't read
+        // (e.g. a permission-denied subdirectory) rather than aborting the
+        // whole scan, so one unreadable subtree can't prevent partial
+        // results elsewhere in the tree (NFR-017/018). Surfacing these
+        // errors to callers is deferred to a later version.
         .filter_map(|result| result.ok())
         .filter(|entry| entry.file_type().is_some_and(|ft| ft.is_file()))
         .filter_map(|entry| {
@@ -98,12 +103,7 @@ pub fn scan(root: &Path, extra_ignores: &[String]) -> Vec<Discovered> {
         })
         .collect();
 
-    discovered.sort_by(|a, b| {
-        let depth = |p: &Path| p.components().count();
-        depth(&a.rel_path)
-            .cmp(&depth(&b.rel_path))
-            .then_with(|| a.rel_path.cmp(&b.rel_path))
-    });
+    discovered.sort_by_cached_key(|d| (d.rel_path.components().count(), d.rel_path.clone()));
 
     discovered
 }
@@ -340,6 +340,36 @@ mod tests {
             vec![
                 (PathBuf::from(".env"), SourceKind::Dotenv),
                 (PathBuf::from("apps/web/.env"), SourceKind::Dotenv),
+            ]
+        );
+    }
+
+    #[test]
+    fn same_depth_lexicographic_tiebreak() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+
+        // All three live at the same depth (one directory component deep),
+        // so the sort must fall back to lexicographic order on `rel_path`.
+        // Touched out of order to make sure the result isn't accidentally
+        // insertion-ordered.
+        touch(root, "zeta/.env");
+        touch(root, "alpha/.env");
+        touch(root, "mid/.env");
+
+        // Intentionally not using `scan_default`/`sorted` here: this test
+        // asserts on the raw order `scan` returns, without re-sorting it.
+        let result = scan(root, &[])
+            .into_iter()
+            .map(|d| d.rel_path)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            result,
+            vec![
+                PathBuf::from("alpha/.env"),
+                PathBuf::from("mid/.env"),
+                PathBuf::from("zeta/.env"),
             ]
         );
     }
