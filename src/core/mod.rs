@@ -207,6 +207,42 @@ pub fn analyze(
     Ok(analysis)
 }
 
+pub fn re_resolve(
+    analysis: &mut Analysis,
+    config: &Config,
+    profile: Option<&str>,
+    tracked: Option<&BTreeSet<PathBuf>>,
+) {
+    let enabled_by_id: BTreeMap<String, bool> = analysis
+        .sources
+        .iter()
+        .map(|source| (source.id.clone(), source.enabled))
+        .collect();
+    let mut occurrences: Vec<VariableOccurrence> = analysis
+        .variables
+        .iter()
+        .flat_map(|variable| variable.occurrences.iter().cloned())
+        .collect();
+    classify_occurrences(&mut occurrences, config);
+    let required = required_keys_from_existing_sources(analysis, config, &occurrences);
+
+    let _ = resolve::rank_sources(&mut analysis.sources, config, profile, None);
+    for source in &mut analysis.sources {
+        if let Some(enabled) = enabled_by_id.get(&source.id) {
+            source.enabled = *enabled;
+        }
+    }
+
+    let mut variables = resolve::resolve(&analysis.sources, occurrences);
+    let reference_diagnostics = resolve::expand_references(&mut variables);
+    refresh_variable_secret_flags(&mut variables);
+
+    analysis.profile = profile.unwrap_or("default").to_string();
+    analysis.variables = variables;
+    analysis.diagnostics = reference_diagnostics;
+    diagnostics::run(analysis, &required, tracked);
+}
+
 fn source(
     id: String,
     kind: SourceKind,
@@ -230,6 +266,32 @@ fn path_id(path: &Path) -> String {
         .map(|component| component.as_os_str().to_string_lossy())
         .collect::<Vec<_>>()
         .join("/")
+}
+
+fn required_keys_from_existing_sources(
+    analysis: &Analysis,
+    config: &Config,
+    occurrences: &[VariableOccurrence],
+) -> BTreeSet<String> {
+    let mut required: BTreeSet<String> = config.required.iter().cloned().collect();
+    if !config.required_from_examples {
+        return required;
+    }
+
+    let kind_by_id: BTreeMap<&str, SourceKind> = analysis
+        .sources
+        .iter()
+        .map(|source| (source.id.as_str(), source.kind))
+        .collect();
+    required.extend(
+        occurrences
+            .iter()
+            .filter(|occurrence| {
+                kind_by_id.get(occurrence.source_id.as_str()) == Some(&SourceKind::DotenvExample)
+            })
+            .map(|occurrence| occurrence.key.clone()),
+    );
+    required
 }
 
 fn classify_occurrences(occurrences: &mut [VariableOccurrence], config: &Config) {
@@ -462,5 +524,50 @@ mod tests {
             .expect("PUBLIC_ALIAS should conflict across sources");
         assert!(conflict.message.contains('•'));
         assert!(!conflict.message.contains("envlensFakeHistoricalSecret"));
+    }
+
+    #[test]
+    fn re_resolve_preserves_toggles_and_tracked_secret_diagnostics() {
+        let tracked = Some(BTreeSet::from([PathBuf::from(".env.local")]));
+        let mut analysis = analyze(
+            &fixture("basic"),
+            &Config::default(),
+            None,
+            None,
+            External {
+                process_env: BTreeMap::new(),
+                tracked_files: tracked.clone(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            variable(&analysis, "PORT").effective.as_ref(),
+            Some(&("5001".to_string(), ".env.local".to_string()))
+        );
+
+        let env_local = analysis
+            .sources
+            .iter_mut()
+            .find(|source| source.id == ".env.local")
+            .unwrap_or_else(|| panic!("missing .env.local"));
+        env_local.enabled = false;
+        re_resolve(&mut analysis, &Config::default(), None, tracked.as_ref());
+
+        assert!(
+            !analysis
+                .sources
+                .iter()
+                .find(|source| source.id == ".env.local")
+                .unwrap_or_else(|| panic!("missing .env.local"))
+                .enabled
+        );
+        assert_eq!(
+            variable(&analysis, "PORT").effective.as_ref(),
+            Some(&("3000".to_string(), ".env".to_string()))
+        );
+        assert!(analysis.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == DiagnosticCode::SecretInTrackedFile
+                && diagnostic.key.as_deref() == Some("STRIPE_API_KEY")
+        }));
     }
 }

@@ -6,3 +6,4 @@ pub mod config;
 pub mod core;
 pub mod git;
 pub mod report;
+pub mod tui;
