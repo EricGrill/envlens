@@ -182,7 +182,7 @@ Snapshot of `std::env::vars_os()`, lossy-decoded, sorted by key. No line numbers
 
 ## 8. Diagnostics
 
-All rules run over the `Analysis` in one pass, emitting SRS §8 codes with actionable messages in the NFR-012 style, e.g. `PORT differs across sources: .env:3 (3000), docker-compose.yml[api]:12 (5001). Effective value is 5001 from docker-compose.yml[api].`
+All rules run over the `Analysis` in one pass, emitting SRS §8 codes with actionable messages in the NFR-012 style, e.g. `PORT differs across sources: .env:3 (3000), docker-compose.yml[api]:12 (5001). Effective value is 5001 from docker-compose.yml[api].` Occurrences without a line number (the `process` source) render without the `:line` suffix — `process (5001)` — keeping message snapshots deterministic.
 
 Diagnostic messages embed values, so **message composition renders every value through the masking function** — for a secret-like key the message reads `JWT_SECRET differs across sources: .env:2 (••••••••3a), .env.local:5 (••••••••8F)`. This closes the path around the `MaskedValue` report boundary (NFR-005); the §14 secrets fixture includes a *conflicting* secret-like key specifically to regression-test it.
 
@@ -192,7 +192,7 @@ Diagnostic messages embed values, so **message composition renders every value t
 | `ConflictingValues` (warning) | ≥2 distinct defined values across different enabled *value-bearing* sources (dotenv, compose, scripts, process). Example and CI sources never participate — examples are requirements, CI occurrences are informational context shown in the details pane only. Cross-service/cross-script same-file differences downgrade to info (§2 decisions, §5 same-rank ordering). |
 | `ShadowedValue` (info) | Any value-bearing occurrence overridden by a higher-precedence one with a different or equal value. Example/CI occurrences neither shadow nor are shadowed. |
 | `MissingRequired` (error) | Required key (from example files + config `required:`) with no defined occurrence in enabled *value-bearing* sources (dotenv, compose, scripts, process — same scoping as `ConflictingValues`; a key defined only in a CI file is still missing). |
-| `EmptyRequired` (warning) | Required key defined in value-bearing sources but empty in all of them. |
+| `EmptyRequired` (warning) | Required key defined in enabled value-bearing sources but empty in all of them. |
 | `UndefinedReference` (warning) | See §7. |
 | `CircularReference` (error) | See §7. |
 | `InvalidDotenvLine` (warning) | From parser errors. |
@@ -266,7 +266,7 @@ Elm-style: `App` state struct; `Event` enum (key, resize, tick); `update(&mut Ap
 
 - **Unit (in-module):** dotenv parser table tests covering every FR-010–014 form plus pathological inputs (unterminated quotes, CRLF, BOM, unicode keys, 10k-char lines); compose map/list/bare-key; package-script tokenizer incl. `cross-env` and `set … &&`; precedence/profile resolution; reference expansion + cycles; segment-based secret matching (incl. `KEYBOARD_LAYOUT` negative case); masking widths; config merge.
 - **Fixtures:** `tests/fixtures/{basic,conflicts,secrets,compose,scripts,invalid,monorepo,ci}` — small real project trees, committed. `fixtures/basic` satisfies the SRS §15 milestone assertions.
-- **Integration (`tests/cli.rs`, assert_cmd):** exit codes 0/1/2/3 paths, `--strict`, `check --json` parses and matches a documented schema (serde round-trip + insta snapshot), markdown report golden file, determinism (two runs with `SOURCE_DATE_EPOCH` pinned → byte-identical stdout), `--no-values` truly value-free, planted fake secrets (e.g. `envlensFakeHistoricalSecret…`) never appear unmasked in any export mode, empty-directory behavior (exit 0, `process`-only source list).
+- **Integration (`tests/cli.rs`, assert_cmd):** exit codes 0/1/2/3 paths, `--strict`, `check --json` parses and matches a documented schema (serde round-trip + insta snapshot), markdown report golden file, determinism (two runs with `SOURCE_DATE_EPOCH` pinned → byte-identical stdout), `--no-values` truly value-free, planted fake secrets (e.g. `envlensFakeHistoricalSecret…`) never appear unmasked in any output mode — including `check` human-readable and JSON diagnostic messages, not just `report/` writers — empty-directory behavior (exit 0, `process`-only source list).
 - **TUI snapshots (`tests/tui.rs`, insta + `TestBackend`):** initial render on `fixtures/basic`, search active, each filter mode, details with masked vs revealed secret, help overlay, ASCII/no-color mode, narrow-terminal (80×24) render.
 - **Supply-chain/NFR checks in CI:** `cargo tree` asserted to contain no network stack (`reqwest|hyper|curl|ureq`); `cargo deny` advisories optional-but-included if setup friction is low, otherwise `cargo audit` in CI.
 - Coverage goal: parsers/resolve/diagnostics/secrets ≥ 90% line coverage (measured with `cargo llvm-cov` in CI, informational not gating).
