@@ -496,7 +496,7 @@ fn selected_variable(app: &App) -> Option<&VariableSummary> {
     visible_variables(app).get(app.selected_var).copied()
 }
 
-fn clamp_selections(app: &mut App) {
+pub fn clamp_selections(app: &mut App) {
     app.selected_source = app
         .selected_source
         .min(app.analysis.sources.len().saturating_sub(1));

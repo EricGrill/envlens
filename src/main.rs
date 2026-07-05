@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Parser;
@@ -6,7 +8,18 @@ use envlens::config::Config;
 use envlens::core::model::{Analysis, Severity};
 use envlens::core::{AnalyzeError, External};
 use envlens::report::{generated_at, render_check_human, sanitize_text};
+use envlens::tui::RunOptions;
+use envlens::tui::theme::Theme;
 use std::fs;
+
+struct AnalysisContext {
+    analysis: Analysis,
+    config: Config,
+    tracked: Option<BTreeSet<PathBuf>>,
+}
+
+type CliResult<T> = Result<T, (u8, String)>;
+type AnalysisWithTracked = (Analysis, Option<BTreeSet<PathBuf>>);
 
 fn main() -> ExitCode {
     install_panic_hook();
@@ -40,14 +53,45 @@ fn install_panic_hook() {
     }));
 }
 
-fn run(mut cli: Cli) -> Result<u8, (u8, String)> {
+fn run(mut cli: Cli) -> CliResult<u8> {
     let command = cli.command.take();
     match command {
         None => {
             let root = cli.path.clone().unwrap_or_else(|| ".".into());
-            let _analysis = analyze_for_cli(&root, &cli)?;
-            eprintln!("TUI not yet implemented");
-            Ok(4)
+            let context = analyze_context_for_cli(&root, &cli)?;
+            let theme = Theme::new(!should_color_output(&cli), cli.ascii);
+            let has_editor = std::env::var_os("EDITOR").is_some();
+            let refresh_root = root.clone();
+            let refresh_config = context.config.clone();
+            let refresh_profile = cli.profile.clone();
+            let refresh_sources = cli.source.clone();
+            envlens::tui::run(
+                RunOptions {
+                    analysis: context.analysis,
+                    root,
+                    config: context.config,
+                    profile: cli.profile.clone(),
+                    tracked: context.tracked,
+                    theme,
+                    has_editor,
+                },
+                move || {
+                    analyze_with_external(
+                        &refresh_root,
+                        &refresh_config,
+                        refresh_profile.as_deref(),
+                        &refresh_sources,
+                    )
+                    .map_err(|(_, message)| anyhow::anyhow!(message))
+                },
+            )
+            .map_err(|err| {
+                (
+                    4,
+                    format!("could not start TUI: {}", sanitize_text(&err.to_string())),
+                )
+            })?;
+            Ok(0)
         }
         Some(Command::Check {
             path,
@@ -106,7 +150,7 @@ fn render_report(
     format: ReportFormat,
     generated_at: String,
     no_values: bool,
-) -> Result<String, (u8, String)> {
+) -> CliResult<String> {
     match format {
         ReportFormat::Markdown => Ok(envlens::report::markdown::render(
             analysis,
@@ -130,35 +174,50 @@ fn should_color_output(cli: &Cli) -> bool {
     !cli.no_color && std::env::var_os("NO_COLOR").is_none()
 }
 
-fn analyze_for_cli(root: &std::path::Path, cli: &Cli) -> Result<Analysis, (u8, String)> {
+fn analyze_for_cli(root: &Path, cli: &Cli) -> CliResult<Analysis> {
+    analyze_context_for_cli(root, cli).map(|context| context.analysis)
+}
+
+fn analyze_context_for_cli(root: &Path, cli: &Cli) -> CliResult<AnalysisContext> {
     let config = Config {
         ignore: cli.ignore.clone(),
         ..Config::default()
     };
+    let (analysis, tracked) =
+        analyze_with_external(root, &config, cli.profile.as_deref(), &cli.source)?;
+    Ok(AnalysisContext {
+        analysis,
+        config,
+        tracked,
+    })
+}
+
+fn analyze_with_external(
+    root: &Path,
+    config: &Config,
+    profile: Option<&str>,
+    source_filter: &[String],
+) -> CliResult<AnalysisWithTracked> {
+    let tracked_files = envlens::git::tracked_files(root);
     let external = External {
         process_env: envlens::core::parsers::process::capture(),
-        tracked_files: envlens::git::tracked_files(root),
+        tracked_files: tracked_files.clone(),
     };
-    let source_filter = (!cli.source.is_empty()).then_some(cli.source.as_slice());
+    let source_filter = (!source_filter.is_empty()).then_some(source_filter);
 
-    envlens::core::analyze(
-        root,
-        &config,
-        cli.profile.as_deref(),
-        source_filter,
-        external,
-    )
-    .map_err(|err| match err {
-        AnalyzeError::RootUnreadable(path) => {
-            (3, format!("root is unreadable: {}", path.display()))
-        }
-        AnalyzeError::UnknownProfile(name) => {
-            (2, format!("unknown profile '{}'", sanitize_text(&name)))
-        }
-        AnalyzeError::UnknownSource(name) => {
-            (2, format!("unknown source '{}'", sanitize_text(&name)))
-        }
-    })
+    envlens::core::analyze(root, config, profile, source_filter, external)
+        .map(|analysis| (analysis, tracked_files))
+        .map_err(|err| match err {
+            AnalyzeError::RootUnreadable(path) => {
+                (3, format!("root is unreadable: {}", path.display()))
+            }
+            AnalyzeError::UnknownProfile(name) => {
+                (2, format!("unknown profile '{}'", sanitize_text(&name)))
+            }
+            AnalyzeError::UnknownSource(name) => {
+                (2, format!("unknown source '{}'", sanitize_text(&name)))
+            }
+        })
 }
 
 fn check_exit_code(analysis: &Analysis, strict: bool) -> u8 {

@@ -353,12 +353,12 @@ fn check_strict_threshold_fails_on_warnings() {
 }
 
 #[test]
-fn bare_tui_stub_exits_4() {
+fn bare_tui_without_tty_exits_4() {
     cmd()
         .arg("tests/fixtures/empty")
         .assert()
         .code(4)
-        .stderr(predicate::str::contains("TUI not yet implemented"));
+        .stderr(predicate::str::contains("could not start TUI"));
 }
 
 #[test]
@@ -515,7 +515,7 @@ fn report_always_exits_0() {
 }
 
 #[test]
-fn bare_tui_validates_profile_source_and_root_before_stub() {
+fn bare_tui_validates_profile_source_and_root_before_terminal() {
     cmd()
         .args(["--profile", "missing", "tests/fixtures/empty"])
         .assert()
