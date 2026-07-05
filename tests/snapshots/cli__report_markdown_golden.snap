@@ -4,8 +4,8 @@ expression: stdout
 ---
 # EnvLens Report
 
-Project: tests/fixtures/basic  
-Generated: 1970-01-01T00:00:00Z  
+Project: tests/fixtures/basic
+Generated: 1970-01-01T00:00:00Z
 Profile: default
 
 ## Summary

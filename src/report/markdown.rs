@@ -6,8 +6,8 @@ use crate::report::{
 pub fn render(analysis: &Analysis, generated_at: impl AsRef<str>, no_values: bool) -> String {
     let mut output = String::new();
     output.push_str("# EnvLens Report\n\n");
-    output.push_str(&format!("Project: {}  \n", analysis.root.to_string_lossy()));
-    output.push_str(&format!("Generated: {}  \n", generated_at.as_ref()));
+    output.push_str(&format!("Project: {}\n", analysis.root.to_string_lossy()));
+    output.push_str(&format!("Generated: {}\n", generated_at.as_ref()));
     output.push_str(&format!("Profile: {}\n\n", analysis.profile));
 
     output.push_str("## Summary\n\n");
