@@ -4,12 +4,18 @@ use clap::Parser;
 use envlens::cli::{Cli, Command};
 use envlens::config::Config;
 use envlens::core::model::{Analysis, Severity, SourceKind};
-use envlens::core::secrets::MaskedValue;
+use envlens::core::secrets::{MaskedValue, classify_value};
 use envlens::core::{AnalyzeError, External};
+use regex::Regex;
 use serde_json::json;
+use std::sync::OnceLock;
 
 fn main() -> ExitCode {
     install_panic_hook();
+    #[cfg(debug_assertions)]
+    if std::env::var_os("ENVLENS_TEST_PANIC").is_some() {
+        panic!("forced envlens test panic {}", "x".repeat(1024));
+    }
     let cli = Cli::parse();
     match run(cli) {
         Ok(code) => ExitCode::from(code),
@@ -119,7 +125,9 @@ fn print_human_check(analysis: &Analysis) {
     for diagnostic in &analysis.diagnostics {
         println!(
             "{:?} {:?} {}",
-            diagnostic.severity, diagnostic.code, diagnostic.message
+            diagnostic.severity,
+            diagnostic.code,
+            sanitize_text(&diagnostic.message)
         );
     }
 }
@@ -136,7 +144,12 @@ fn minimal_json(analysis: &Analysis, no_values: bool) -> Result<String, (u8, Str
                 "context": source.context,
                 "precedence": source.precedence,
                 "enabled": source.enabled,
-                "errors": source.errors,
+                "errors": source.errors.iter().map(|error| {
+                    json!({
+                        "line": error.line,
+                        "message": sanitize_text(&error.message),
+                    })
+                }).collect::<Vec<_>>(),
             })
         })
         .collect();
@@ -163,7 +176,7 @@ fn minimal_json(analysis: &Analysis, no_values: bool) -> Result<String, (u8, Str
                 "is_required": var.is_required,
                 "is_missing": var.is_missing,
                 "is_secret_like": var.is_secret_like,
-                "diagnostics": var.diagnostics,
+                "diagnostics": var.diagnostics.iter().map(diagnostic_json).collect::<Vec<_>>(),
             })
         })
         .collect();
@@ -173,9 +186,44 @@ fn minimal_json(analysis: &Analysis, no_values: bool) -> Result<String, (u8, Str
         "profile": analysis.profile,
         "sources": sources,
         "variables": variables,
-        "diagnostics": analysis.diagnostics,
+        "diagnostics": analysis.diagnostics.iter().map(diagnostic_json).collect::<Vec<_>>(),
     }))
     .map_err(|err| (4, format!("could not serialize analysis: {err}")))
+}
+
+fn diagnostic_json(diagnostic: &envlens::core::model::Diagnostic) -> serde_json::Value {
+    json!({
+        "severity": diagnostic.severity,
+        "code": diagnostic.code,
+        "message": sanitize_text(&diagnostic.message),
+        "key": diagnostic.key,
+        "source_id": diagnostic.source_id,
+        "line": diagnostic.line,
+    })
+}
+
+fn sanitize_text(text: &str) -> String {
+    secret_token_regex()
+        .replace_all(text, |captures: &regex::Captures<'_>| {
+            let token = captures
+                .get(0)
+                .map(|matched| matched.as_str())
+                .unwrap_or("");
+            if classify_value(token) {
+                MaskedValue::new(token, true, false).to_string()
+            } else {
+                token.to_string()
+            }
+        })
+        .into_owned()
+}
+
+fn secret_token_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| match Regex::new(r"[A-Za-z0-9_./:@+=-]{8,}") {
+        Ok(regex) => regex,
+        Err(err) => panic!("secret redaction regex constant is invalid: {err}"),
+    })
 }
 
 fn source_kind(kind: SourceKind) -> &'static str {

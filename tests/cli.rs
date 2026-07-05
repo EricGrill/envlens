@@ -86,3 +86,91 @@ fn source_filter_reaches_output() {
     assert_eq!(port["effective"]["source_id"], ".env");
     assert_eq!(port["effective"]["value"], "3000");
 }
+
+#[test]
+fn malformed_secret_never_leaks_json_or_human() {
+    let raw = "envlensFakeHistoricalSecret";
+
+    for args in [
+        vec!["check", "--json", "tests/fixtures/malformed-secret"],
+        vec![
+            "check",
+            "--json",
+            "--no-values",
+            "tests/fixtures/malformed-secret",
+        ],
+    ] {
+        let output = cmd()
+            .args(args)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let stdout = String::from_utf8_lossy(&output);
+        assert!(!stdout.contains(raw), "json leaked raw secret: {stdout}");
+    }
+
+    let output = cmd()
+        .args(["check", "tests/fixtures/malformed-secret"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8_lossy(&output);
+    assert!(
+        !stdout.contains(raw),
+        "human output leaked raw secret: {stdout}"
+    );
+}
+
+#[test]
+fn subcommand_path_wins_over_parent_path() {
+    cmd()
+        .args(["/definitely/not/envlens", "check", "tests/fixtures/empty"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn check_strict_threshold_fails_on_warnings() {
+    cmd()
+        .args(["check", "tests/fixtures/malformed-secret"])
+        .assert()
+        .success();
+
+    cmd()
+        .args(["check", "--strict", "tests/fixtures/malformed-secret"])
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn bare_tui_and_report_stubs_exit_4() {
+    cmd()
+        .arg("tests/fixtures/empty")
+        .assert()
+        .code(4)
+        .stderr(predicate::str::contains("TUI not yet implemented"));
+
+    cmd()
+        .args(["report", "--format", "json", "tests/fixtures/empty"])
+        .assert()
+        .code(4)
+        .stderr(predicate::str::contains("report not yet implemented"));
+}
+
+#[test]
+fn panic_hook_exits_4() {
+    let output = cmd()
+        .env("ENVLENS_TEST_PANIC", "1")
+        .assert()
+        .code(4)
+        .get_output()
+        .stderr
+        .clone();
+    let stderr = String::from_utf8_lossy(&output);
+    assert!(stderr.contains("internal error:"));
+    assert!(stderr.contains("forced envlens test panic"));
+}
