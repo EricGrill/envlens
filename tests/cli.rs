@@ -370,6 +370,8 @@ fn discovered_config_fail_on_warning_and_custom_profile_are_wired() {
         .clone();
     let json: Value = serde_json::from_slice(&output).expect("valid json");
 
+    assert_eq!(json["summary"]["errors"], 0);
+    assert!(json["summary"]["warnings"].as_u64().unwrap_or(0) > 0);
     assert_eq!(json["profile"], "web");
     let port = json["variables"]
         .as_array()
@@ -474,6 +476,36 @@ fn config_ignore_reaches_scanner() {
 
     assert!(sources.contains(&".env"));
     assert!(!sources.contains(&"tmp/.env"));
+}
+
+#[test]
+fn config_warnings_go_to_stderr_and_keep_json_stdout_parseable() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let unknown_key = tempdir.path().join("unknown.yml");
+    let malformed = tempdir.path().join("malformed.yml");
+    fs::write(&unknown_key, "mystery: true\n").expect("unknown config");
+    fs::write(&malformed, "required: [DATABASE_URL\n").expect("malformed config");
+
+    for config in [unknown_key, malformed] {
+        let output = cmd()
+            .env("SOURCE_DATE_EPOCH", "0")
+            .arg("--config")
+            .arg(&config)
+            .args(["check", "--json", "tests/fixtures/empty"])
+            .assert()
+            .success()
+            .stderr(predicate::str::contains("warning:"))
+            .get_output()
+            .clone();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            !stdout.contains("warning:"),
+            "warning leaked into stdout: {stdout}"
+        );
+        let json: Value = serde_json::from_slice(&output.stdout).expect("valid json");
+        assert_eq!(json["version"], 1);
+        assert_eq!(json["root"], "tests/fixtures/empty");
+    }
 }
 
 #[test]
