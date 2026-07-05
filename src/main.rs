@@ -68,7 +68,7 @@ fn run(mut cli: Cli) -> Result<u8, (u8, String)> {
             } else {
                 print!(
                     "{}",
-                    render_check_human(&analysis, should_color_output(&cli))
+                    render_check_human(&analysis, should_color_output(&cli), no_values)
                 );
             }
             Ok(check_exit_code(&analysis, strict))

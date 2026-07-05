@@ -97,8 +97,8 @@ expression: snapshot
         {
           "source_id": ".env.example",
           "line": 3,
-          "raw": "",
-          "value": "",
+          "raw": "••••••••",
+          "value": "••••••••",
           "is_empty": true,
           "is_inherited": false,
           "no_expand": false,

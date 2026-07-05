@@ -2,8 +2,8 @@ use serde::Serialize;
 
 use crate::core::model::{Analysis, Diagnostic, EnvSource, ParseError, VariableOccurrence};
 use crate::report::{
-    count_severity, diagnostic_code_name, masked_value, sanitize_text, secret_class_name,
-    severity_name, source_kind_name,
+    count_severity, diagnostic_code_name, diagnostic_message, masked_value, sanitize_text,
+    secret_class_name, severity_name, source_kind_name,
 };
 
 #[derive(Serialize)]
@@ -142,7 +142,9 @@ pub fn render(
                     occurrences: variable
                         .occurrences
                         .iter()
-                        .map(|occurrence| occurrence_json(occurrence, no_values))
+                        .map(|occurrence| {
+                            occurrence_json(occurrence, variable.is_secret_like, no_values)
+                        })
                         .collect(),
                     is_required: variable.is_required,
                     is_missing: variable.is_missing,
@@ -195,8 +197,12 @@ fn source_error_json(error: &ParseError, no_values: bool) -> SourceError {
     }
 }
 
-fn occurrence_json(occurrence: &VariableOccurrence, no_values: bool) -> Occurrence {
-    let is_secret = occurrence.secret.is_secret();
+fn occurrence_json(
+    occurrence: &VariableOccurrence,
+    parent_is_secret_like: bool,
+    no_values: bool,
+) -> Occurrence {
+    let is_secret = parent_is_secret_like || occurrence.secret.is_secret();
     Occurrence {
         source_id: occurrence.source_id.clone(),
         line: occurrence.line,
@@ -231,23 +237,5 @@ fn diagnostic_json(diagnostic: &Diagnostic, no_values: bool) -> DiagnosticEntry 
         key: diagnostic.key.clone(),
         source_id: diagnostic.source_id.clone(),
         line: diagnostic.line,
-    }
-}
-
-fn diagnostic_message(diagnostic: &Diagnostic, no_values: bool) -> String {
-    if !no_values {
-        return sanitize_text(&diagnostic.message);
-    }
-
-    let subject = diagnostic.key.as_deref().unwrap_or("variable");
-    match diagnostic.code {
-        crate::core::model::DiagnosticCode::ConflictingValues => {
-            format!("{subject} differs across sources.")
-        }
-        crate::core::model::DiagnosticCode::ShadowedValue => {
-            format!("{subject} is shadowed by a higher-precedence source.")
-        }
-        crate::core::model::DiagnosticCode::InvalidDotenvLine => "invalid dotenv line".to_string(),
-        _ => sanitize_text(&diagnostic.message),
     }
 }

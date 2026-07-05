@@ -3,7 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use regex::Regex;
 use std::sync::OnceLock;
 
-use crate::core::model::{Analysis, DiagnosticCode, SecretClass, Severity, SourceKind};
+use crate::core::model::{Analysis, Diagnostic, DiagnosticCode, SecretClass, Severity, SourceKind};
 use crate::core::secrets::{MaskedValue, classify_value};
 
 pub mod json;
@@ -27,7 +27,7 @@ pub fn from_epoch(seconds: u64) -> String {
     format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
 }
 
-pub fn render_check_human(analysis: &Analysis, color: bool) -> String {
+pub fn render_check_human(analysis: &Analysis, color: bool, no_values: bool) -> String {
     let mut output = String::new();
     for diagnostic in &analysis.diagnostics {
         let severity = severity_name(diagnostic.severity);
@@ -43,7 +43,7 @@ pub fn render_check_human(analysis: &Analysis, color: bool) -> String {
             .unwrap_or("-");
         output.push_str(&format!(
             "{label} {subject} {}\n",
-            sanitize_text(&diagnostic.message)
+            diagnostic_message(diagnostic, no_values)
         ));
     }
 
@@ -114,6 +114,24 @@ pub(crate) fn diagnostic_code_name(code: DiagnosticCode) -> &'static str {
         DiagnosticCode::SecretInTrackedFile => "secret_in_tracked_file",
         DiagnosticCode::InheritedUnresolved => "inherited_unresolved",
         DiagnosticCode::ShadowedValue => "shadowed_value",
+    }
+}
+
+pub(crate) fn diagnostic_message(diagnostic: &Diagnostic, no_values: bool) -> String {
+    if !no_values {
+        return sanitize_text(&diagnostic.message);
+    }
+
+    let subject = diagnostic.key.as_deref().unwrap_or("variable");
+    match diagnostic.code {
+        DiagnosticCode::ConflictingValues => {
+            format!("{subject} differs across sources.")
+        }
+        DiagnosticCode::ShadowedValue => {
+            format!("{subject} is shadowed by a higher-precedence source.")
+        }
+        DiagnosticCode::InvalidDotenvLine => "invalid dotenv line".to_string(),
+        _ => sanitize_text(&diagnostic.message),
     }
 }
 

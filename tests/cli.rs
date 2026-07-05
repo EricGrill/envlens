@@ -180,6 +180,53 @@ fn no_values_truly_value_free() {
 }
 
 #[test]
+fn no_values_human_output_is_value_free() {
+    let output = cmd()
+        .args(["check", "--no-values", "--no-color", "tests/fixtures/basic"])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8_lossy(&output);
+
+    for raw in ["3000", "5001", "secret123", "sk_live_"] {
+        assert!(!stdout.contains(raw), "human output leaked {raw}: {stdout}");
+    }
+    assert!(stdout.contains("PORT differs across sources."));
+    assert!(stdout.contains("PORT is shadowed by a higher-precedence source."));
+}
+
+#[test]
+fn json_occurrences_inherit_variable_secret_masking() {
+    let output = cmd()
+        .args(["check", "--json", "tests/fixtures/expanded-secret"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8_lossy(&output);
+
+    for raw in ["plain", "${REAL_SECRET}", "envlensFakeHistoricalSecret"] {
+        assert!(!stdout.contains(raw), "json leaked {raw}: {stdout}");
+    }
+
+    let json: Value = serde_json::from_slice(&output).expect("valid json");
+    let public_alias = json["variables"]
+        .as_array()
+        .expect("variables array")
+        .iter()
+        .find(|variable| variable["key"] == "PUBLIC_ALIAS")
+        .expect("PUBLIC_ALIAS variable");
+    assert_eq!(public_alias["is_secret_like"], true);
+    assert_eq!(
+        public_alias["effective"]["value"].as_str().unwrap_or(""),
+        "sk_••••••••••78"
+    );
+}
+
+#[test]
 fn planted_secret_never_unmasked() {
     let json_output = cmd()
         .env("SOURCE_DATE_EPOCH", "0")
