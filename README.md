@@ -71,9 +71,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
+      - uses: dtolnay/rust-toolchain@stable
       - run: cargo install --git https://github.com/EricGrill/envlens
       - run: envlens check --strict --no-values
 ```
@@ -81,7 +79,7 @@ jobs:
 Common options:
 
 ```sh
-envlens [PATH] [--profile NAME] [--source SOURCE]... [--ignore GLOB]... [--config FILE] [--no-color] [--ascii]
+envlens [PATH] [--profile NAME] [--source SOURCE]... [--ignore DIR]... [--config FILE] [--no-color] [--ascii]
 envlens check [PATH] [--json] [--strict] [--no-values]
 envlens report [PATH] --format markdown|json [--out FILE] [--no-values]
 ```
@@ -117,7 +115,7 @@ EnvLens discovers the first project config found in this order:
 It also merges user config from `~/.config/envlens/config.yml` underneath project config. Project keys override user keys; lists replace rather than concatenate. `--config FILE` bypasses discovery.
 
 ```yaml
-ignore: [tmp, generated]                # Extra directories/patterns to skip while scanning.
+ignore: [tmp, generated]                # Extra directory names to skip while scanning.
 required: [DATABASE_URL, NODE_ENV]      # Required variables in addition to example files.
 required_from_examples: true            # Treat .env.example/.sample/.template keys as required.
 secret_patterns: ["SUPABASE_.*"]        # Additional regexes for secret-like keys.
