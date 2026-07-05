@@ -3,6 +3,7 @@
 //! into [`crate::core::model::VariableOccurrence`]s is added alongside the
 //! consumers that need it.
 
+pub mod compose;
 pub mod dotenv;
 pub mod process;
 
