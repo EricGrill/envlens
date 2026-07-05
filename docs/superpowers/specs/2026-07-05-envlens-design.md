@@ -67,7 +67,9 @@ src/
 
 `core::analyze()` runs: scan → parse each source → collect occurrences → apply profile + source filter → order sources by precedence → compute effective values → resolve `${VAR}` references → run diagnostics → return `Analysis`.
 
-`Analysis` contains: sources (with parse errors), variable summaries (sorted by key), diagnostics, and the resolved profile/precedence used. The TUI, `check`, and `report` all consume `Analysis`; nothing downstream re-derives semantic facts. Re-running `analyze` on identical inputs yields identical output (NFR-019); all maps iterate in sorted or insertion order (`BTreeMap`/`Vec`, never `HashMap` iteration into output).
+`Analysis` contains: sources (with parse errors), variable summaries (sorted by key), diagnostics, and the resolved profile/precedence used. The TUI, `check`, and `report` all consume `Analysis`; nothing downstream re-derives semantic facts. Re-running `analyze` on identical inputs yields identical output (NFR-019); all maps iterate in sorted or insertion order (`BTreeMap`/`Vec`, never `HashMap` iteration into output). `Analysis` itself contains no timestamps; report timestamps are added at the frontend boundary from a clock that honors `SOURCE_DATE_EPOCH` (reproducible-builds convention), which is how the byte-identical determinism test in §14 passes while normal runs still show a real timestamp.
+
+Core performs no process spawning and no I/O beyond reading discovered files and `std::env::vars_os()`. Facts that require external processes are passed *into* `analyze` as data: the frontend runs `git ls-files -z` (only when a `.git` directory exists at the root) and supplies `tracked_files: Option<BTreeSet<PathBuf>>`; `None` (git absent or command failed) simply disables the `SecretInTrackedFile` rule.
 
 ### Dependencies
 
@@ -123,7 +125,9 @@ struct Diagnostic {
 }
 ```
 
-`DiagnosticCode` is a closed enum matching SRS §8 exactly: `DuplicateKey`, `ConflictingValues`, `MissingRequired`, `EmptyRequired`, `UndefinedReference`, `CircularReference`, `InvalidDotenvLine`, `SecretInTrackedFile`, `InheritedUnresolved`, `ShadowedValue`. (`SecretInTrackedFile` ships in v0.1 only when git tracking is trivially detectable via `git ls-files` output if a `.git` directory exists; if git is absent the code is simply never emitted. This keeps SRS §8 complete without importing §6.6 git-awareness scope.)
+`DiagnosticCode` is a closed enum matching SRS §8 exactly: `DuplicateKey`, `ConflictingValues`, `MissingRequired`, `EmptyRequired`, `UndefinedReference`, `CircularReference`, `InvalidDotenvLine`, `SecretInTrackedFile`, `InheritedUnresolved`, `ShadowedValue`. (`SecretInTrackedFile` fires only when the frontend supplied `tracked_files` per §3; if git is absent the code is never emitted. This keeps SRS §8 complete without importing §6.6 git-awareness scope.)
+
+Deliberate adaptations of the SRS §7 TypeScript model: FR-019's per-occurrence "warning list" is realized as `Diagnostic`s carrying `source_id` + `line` (the details pane joins them back to occurrences); the SRS `parsedAt` field is dropped because it would violate NFR-019 determinism; the SRS `"config"` source type is unused in v0.1 (nothing parses env vars out of `.envlens.yml` itself).
 
 ## 5. Scanning and discovery
 
@@ -135,7 +139,14 @@ struct Diagnostic {
   - Package manifests: `package.json` parsed for scripts; `pnpm-workspace.yaml`, `turbo.json`, `nx.json` are discovered and listed as sources but contribute no variables in v0.1 (shown with a note in the details pane).
   - CI configs: `.github/workflows/*.yml|yaml`, `.gitlab-ci.yml`, `circle.yml`, `.circleci/config.yml` — discovered and listed; top-level and job-level `env:` maps are parsed for GitHub Actions and GitLab (`variables:`) since that is cheap with serde_yaml; deeper constructs (matrix, secrets contexts) are out of scope and noted as a documented limitation.
   - Process environment: always present as source `process` (FR-009).
-- Nested files (monorepos) are discovered and identified by project-relative path (`apps/web/.env`); precedence within the same dotenv rank is resolved by shallower-path-first, then lexicographic path order.
+- Nested files (monorepos) are discovered and identified by project-relative path (`apps/web/.env`).
+
+### Same-rank ordering (deterministic tie-breaks)
+
+- Dotenv files of the same rank (e.g. two `.env.local` in different subdirectories): shallower path first, then lexicographic path order; the later one wins.
+- Compose: base files (`docker-compose.yml|yaml`, `compose.yml|yaml`) share one rank; `docker-compose.override.yml|yaml` ranks **above** its base, matching Compose's own override semantics. Within one file, services are sub-sources in document order.
+- Package scripts: sub-sources `package.json[<script>]` ordered by document order of the scripts map; multiple `package.json` files order by the dotenv path rule.
+- Where sub-sources of the same file define the same key with different values (two compose services, two scripts), the *last* sub-source in the above order supplies the source's candidate for effective-value resolution, and the difference is reported at info severity (§2 decisions).
 
 ## 6. Parsing rules
 
@@ -151,11 +162,11 @@ Line grammar (FR-010–FR-014):
 
 ### Compose (`parsers/compose.rs`)
 
-Via `serde_yaml::Value` walking (schema-tolerant): for each `services.<name>`, read `environment` as map (FR-015) or list (FR-016). List entries `KEY=value` parse like dotenv unquoted; bare `KEY` becomes an occurrence with `raw_value: None`, `is_inherited: true` — resolved against the process source at diagnostic time (`InheritedUnresolved` info if the process lacks it). `env_file:` entries are noted in the source details but not chained in v0.1 (the referenced files are usually discovered independently by the scanner anyway). Line numbers come from `serde_yaml`'s location support via `serde_yaml::Value` spans where available; otherwise a documented line-scan fallback (search for the literal `KEY:`/`- KEY=` within the service block) supplies best-effort line numbers.
+Via `serde_yaml::Value` walking (schema-tolerant): for each `services.<name>`, read `environment` as map (FR-015) or list (FR-016). List entries `KEY=value` parse like dotenv unquoted; bare `KEY` becomes an occurrence with `raw_value: None`, `is_inherited: true` — resolved against the process source at diagnostic time (`InheritedUnresolved` info if the process lacks it). `env_file:` entries are noted in the source details but not chained in v0.1 (the referenced files are usually discovered independently by the scanner anyway). Line numbers come from a line scan: after structural parsing, the raw file is scanned for the literal `KEY:` / `- KEY=` within the service block to supply best-effort line numbers. (This is the primary mechanism, not a fallback — `serde_yaml` is archived and exposes no spans on `Value`; we accept it for structure because it is stable and ubiquitous, and keep line attribution independent of it.)
 
 ### Package scripts (`parsers/package_json.rs`)
 
-For each `scripts.<name>` string (FR-017/018): tokenize on whitespace; consume leading `KEY=value` tokens as assignments; if a token is `cross-env`, consume subsequent `KEY=value` tokens; stop at the first non-assignment command token. `set KEY=value &&` (Windows cmd) is recognized and parsed too since it is a trivial extension of the same tokenizer. Each script with at least one assignment becomes sub-source `package.json[<script>]`. Line numbers: located by scanning the raw file for the script key (best-effort).
+For each `scripts.<name>` string (FR-017/018): tokenize on whitespace; consume leading `KEY=value` tokens as assignments; if a token is `cross-env`, consume subsequent `KEY=value` tokens; stop at the first non-assignment command token. `set KEY=value &&` (Windows cmd) is recognized and parsed too — SRS §5.2 lists Windows-specific syntax as excluded while FR-018 calls it optional; we include it deliberately because it is a trivial extension of the same tokenizer, not a scope accident. Each script with at least one assignment becomes sub-source `package.json[<script>]`. Line numbers: located by scanning the raw file for the script key (best-effort).
 
 ### Process (`parsers/process.rs`)
 
@@ -175,9 +186,9 @@ All rules run over the `Analysis` in one pass, emitting SRS §8 codes with actio
 
 | Rule | Notes |
 |---|---|
-| `DuplicateKey` (warning) | Same key twice in one source; last occurrence wins within the source; both are recorded. |
-| `ConflictingValues` (warning) | ≥2 distinct defined values across different enabled sources. Cross-service-same-file differences downgrade to info (§2 decisions). |
-| `ShadowedValue` (info) | Any occurrence overridden by a higher-precedence one with a different or equal value. |
+| `DuplicateKey` (warning) | Same key twice in one source (any parsed source, including example and CI files); last occurrence wins within the source; both are recorded. |
+| `ConflictingValues` (warning) | ≥2 distinct defined values across different enabled *value-bearing* sources (dotenv, compose, scripts, process). Example and CI sources never participate — examples are requirements, CI occurrences are informational context shown in the details pane only. Cross-service/cross-script same-file differences downgrade to info (§2 decisions, §5 same-rank ordering). |
+| `ShadowedValue` (info) | Any value-bearing occurrence overridden by a higher-precedence one with a different or equal value. Example/CI occurrences neither shadow nor are shadowed. |
 | `MissingRequired` (error) | Required key (from example files + config `required:`) with no defined occurrence in enabled non-example sources. |
 | `EmptyRequired` (warning) | Required key defined but empty everywhere it appears. |
 | `UndefinedReference` (warning) | See §7. |
@@ -193,8 +204,8 @@ Empty-vs-undefined-vs-inherited-vs-unresolved distinctions (FR-028) are carried 
 - Key classification (FR-032): key split into segments on `_`, `.`, `-`, and lower→upper case boundaries; a key is secret-like if any segment case-insensitively equals one of: `secret`, `token`, `password`, `pass`, `passwd`, `pwd`, `private`, `key`, `credential`, `credentials`, `auth`, `session`, `cookie`, `apikey`. Segment matching means `PUBLIC_KEY` matches (`KEY` segment) but `KEYBOARD_LAYOUT` does not. Config `secret_patterns:` adds user regexes (FR-052).
 - Value classification (FR-033): JWT shape (`eyJ` + two dot-separated base64url parts), PEM headers (`-----BEGIN … PRIVATE KEY-----`), known credential prefixes (`sk_live_`, `sk_test_`, `pk_live_`, `AKIA`, `ghp_`, `gho_`, `github_pat_`, `xoxb-`, `xoxp-`, `glpat-`, `AIza`), URLs with `user:pass@`, and strings ≥ 20 chars with Shannon entropy > 3.5 bits/char and no whitespace.
 - Masking (FR-034): values ≥ 8 chars render as up-to-3-char recognizable prefix (only if the value matches a known-prefix pattern) + `•` run capped at 10 + last 2 chars, e.g. `sk_••••••••••8F`. Values < 8 chars render as `••••••••` (fixed width, length-hiding). ASCII mode uses `*`.
-- Reveal (FR-035, NFR-008): TUI-only state; `r` toggles selected, `R` reveals all after a y/N confirm modal, `Esc` re-masks all. Reveal state never persists and never reaches report writers.
-- Sanitized output (FR-036, NFR-004/005): `report/` and all log/panic output receive only pre-masked strings. A `MaskedValue` newtype whose `Display` is the masked form is used at the report boundary so accidental leakage is a type error. Escape hatch: `envlens report --unsafe-reveal` prints unmasked values to stdout only, with a red warning banner on stderr; never combined with file output.
+- Reveal (FR-035, NFR-008): TUI-only state; `r` toggles selected, `R` reveals all after a y/N confirm modal, `Esc` re-masks (per the transient-state ordering in §12). Reveal state never persists and never reaches report writers. There is deliberately **no** CLI flag to emit unmasked values — exports are always sanitized (FR-036), and anyone needing raw values already has the source files.
+- Sanitized output (FR-036, NFR-004/005): `report/` and all log/panic output receive only pre-masked strings. A `MaskedValue` newtype whose `Display` is the masked form is used at the report boundary so accidental leakage is a type error.
 
 ## 10. Configuration
 
@@ -219,8 +230,10 @@ Unknown keys produce a warning (not an error). A malformed config file falls bac
 ```
 envlens [PATH] [--profile P] [--source S]... [--ignore G]... [--config F] [--no-color] [--ascii]
 envlens check  [PATH] [--json] [--strict] [--no-values] [common flags]
-envlens report [PATH] --format markdown|json [--out FILE] [--unsafe-reveal] [common flags]
+envlens report [PATH] --format markdown|json [--out FILE] [--no-values] [common flags]
 ```
+
+Flag interactions: `--source` intersects with the active profile's include list (a profile selects the candidate set; `--source` narrows it further; naming a source outside the profile is a usage error, exit 2). `--no-values` applies to both `check --json` and `report` (both formats). An empty project (no sources discovered beyond `process`) is not an error: the TUI opens with the sources pane showing `process` and a "no project env sources found" notice; `check` reports zero findings and exits 0 unless config `required:` entries are missing (then normal diagnostics apply).
 
 - Bare `envlens` opens the TUI (FR-044). `check` prints human-readable diagnostics (or `--json`) and exits per threshold (FR-045). `report` writes sanitized markdown per SRS §11 or JSON.
 - Exit codes (FR-046): 0 no findings ≥ threshold; 1 findings ≥ threshold (threshold = error, or warning with `--strict`/`fail_on: warning`); 2 CLI usage error (clap); 3 environment failure — target path missing/unreadable, i.e. no analysis possible (per-file parse errors are diagnostics, not exit 3); 4 internal error via panic hook (message passes through masking, exits 4).
@@ -235,7 +248,9 @@ Elm-style: `App` state struct; `Event` enum (key, resize, tick); `update(&mut Ap
 - Variables pane rows: status icon (`✓` ok, `⚠` warning, `✗` error, `🔒` secret; ASCII `+ ! x #`), key, effective value (masked as needed), effective source. Sorted per active sort (key default; severity, source count, effective source, secret status — FR-041 via `s` menu).
 - Sources pane: each source with occurrence count and parse-error badge; `Space` toggles enabled → re-resolve (not re-parse). Selecting a source filters the variables pane to it (FR-040 "by source").
 - Details pane for the selected key: effective value + winner, all occurrences (source, line, value — masked/revealed, empty/inherited/unresolved annotations), diagnostics with messages.
-- Keys (FR-038): `q` quit, `?` help overlay, `↑/↓`/`j/k` move, `Tab` pane switch, `/` incremental substring search on keys (Esc clears), `f` filter cycle (all → warnings → missing → conflicts → secrets), `s` sort menu, `r` reveal selected, `R` reveal all (confirm), `e` export sanitized markdown (prompts for path, default `envlens-report.md`), `o` open effective source in `$EDITOR +line file` (suspend/restore terminal; disabled with a status message if `$EDITOR` unset), `Enter` expand/collapse occurrence detail, `Ctrl+r` re-scan (NFR-003).
+- Keys (FR-038): `q` quit, `?` help overlay, `↑/↓`/`j/k` move, `Tab` pane switch, `/` incremental substring search on keys, `f` filter cycle (all → warnings → missing → conflicts → secrets), `s` sort menu, `r` reveal selected, `R` reveal all (confirm), `e` export sanitized markdown (prompts for path, default `envlens-report.md`), `o` open effective source in `$EDITOR +line file` (suspend/restore terminal; disabled with a status message if `$EDITOR` unset), `Enter` expand/collapse occurrence detail, `Ctrl+r` re-scan (NFR-003).
+- `Esc` dismisses transient state top-down, one layer per press: open modal/menu first, then active search, then reveal state (re-mask all), then nothing. This resolves the FR-035/FR-039 overlap deterministically.
+- Profile filtering (FR-040) is satisfied by launch-time selection (`--profile`); in-TUI profile switching is deliberately out of scope for v0.1 (it would invalidate most view state for a rarely-toggled setting). Filtering by source is in-TUI via the sources pane.
 - Help overlay lists all keys + active profile/config path (FR-042).
 - Color degradation (NFR-016): styles defined in `theme.rs` with a low-color variant selected when the terminal reports < 256 colors or `NO_COLOR`; icons swap to ASCII with `--ascii` or when the locale is not UTF-8.
 
@@ -249,7 +264,7 @@ Elm-style: `App` state struct; `Event` enum (key, resize, tick); `update(&mut Ap
 
 - **Unit (in-module):** dotenv parser table tests covering every FR-010–014 form plus pathological inputs (unterminated quotes, CRLF, BOM, unicode keys, 10k-char lines); compose map/list/bare-key; package-script tokenizer incl. `cross-env` and `set … &&`; precedence/profile resolution; reference expansion + cycles; segment-based secret matching (incl. `KEYBOARD_LAYOUT` negative case); masking widths; config merge.
 - **Fixtures:** `tests/fixtures/{basic,conflicts,secrets,compose,scripts,invalid,monorepo,ci}` — small real project trees, committed. `fixtures/basic` satisfies the SRS §15 milestone assertions.
-- **Integration (`tests/cli.rs`, assert_cmd):** exit codes 0/1/2/3 paths, `--strict`, `check --json` parses and matches a documented schema (serde round-trip + insta snapshot), markdown report golden file, determinism (two runs, byte-identical stdout), `--no-values` truly value-free, planted fake secrets (e.g. `envlensFakeHistoricalSecret…`) never appear unmasked in any export mode except `--unsafe-reveal`.
+- **Integration (`tests/cli.rs`, assert_cmd):** exit codes 0/1/2/3 paths, `--strict`, `check --json` parses and matches a documented schema (serde round-trip + insta snapshot), markdown report golden file, determinism (two runs with `SOURCE_DATE_EPOCH` pinned → byte-identical stdout), `--no-values` truly value-free, planted fake secrets (e.g. `envlensFakeHistoricalSecret…`) never appear unmasked in any export mode, empty-directory behavior (exit 0, `process`-only source list).
 - **TUI snapshots (`tests/tui.rs`, insta + `TestBackend`):** initial render on `fixtures/basic`, search active, each filter mode, details with masked vs revealed secret, help overlay, ASCII/no-color mode, narrow-terminal (80×24) render.
 - **Supply-chain/NFR checks in CI:** `cargo tree` asserted to contain no network stack (`reqwest|hyper|curl|ureq`); `cargo deny` advisories optional-but-included if setup friction is low, otherwise `cargo audit` in CI.
 - Coverage goal: parsers/resolve/diagnostics/secrets ≥ 90% line coverage (measured with `cargo llvm-cov` in CI, informational not gating).
@@ -272,6 +287,10 @@ Elm-style: `App` state struct; `Event` enum (key, resize, tick); `update(&mut Ap
 
 Everything in SRS §5.2 and §6: secret-manager integrations, deep CI parsing (beyond flat `env:`/`variables:` maps), full shell parsing, file watching, editing files from the TUI, telemetry, network calls, AI fixes, first-class monorepo workspaces, crates.io publish (deferred, name reserved by later publish), Homebrew tap.
 
-## 18. Acceptance criteria mapping
+## 18. Implementation phasing
+
+The implementation plan should phase the work rather than treat it flat: (1) scaffold + core pipeline (scanner, parsers, model, resolve, diagnostics, secrets) with unit tests; (2) CLI frontends (`check`, `report`) with integration tests — this makes the core exercisable end-to-end before any TUI code exists; (3) TUI with snapshot tests; (4) config file + profiles wiring across all frontends; (5) CI/CD, release, README/demo, awesome-tuis PR prep. Each phase leaves the repo green (`fmt`, `clippy`, `test`).
+
+## 19. Acceptance criteria mapping
 
 SRS §13 items 1–14 map to: TUI (§12), parsers (§6), compose (§6), source/line display (§12 details pane), effective values (§7), conflicts (§8), missing-required (§8), masking (§9), search/filter (§12), `check --json` (§11), markdown report (§11), test suite (§14), no-network (§3 deps + CI assertion), no unmasked secrets on disk (§9 `MaskedValue` boundary + §14 security tests).
