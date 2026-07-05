@@ -3,16 +3,29 @@
 //! Structure comes from `serde_yaml::Value`: we walk `services.*.environment`
 //! accepting either mapping form (`KEY: value`) or list form (`- KEY=value`
 //! / bare `- KEY`). `serde_yaml::Mapping` is backed by an `indexmap`, so
-//! service order in the output matches document order for free.
+//! service order in the output matches document order for free. A YAML merge
+//! key (`<<: *anchor`) surfaces in the mapping as a literal `"<<"` key with
+//! the merged-in mapping as its value; it is skipped rather than emitted as
+//! a (garbage) entry.
 //!
 //! serde_yaml has no span information on `Value`, so line numbers are
 //! recovered with a second pass: a line scan. Each service's block is found
 //! by matching its 2-space-indented header line under `services:`; the block
 //! ends at the next line whose indentation is `<= 2` spaces (ignoring blank
-//! lines and comments). Within that block, an entry's line is the first line
-//! whose trimmed text starts with `KEY:`, `- KEY=`, or is exactly `- KEY`
-//! (exact key match, never a substring match). A key that can't be found
-//! this way gets `line: None` rather than a guess.
+//! lines and comments). Within that block we locate the `environment:`
+//! header line at the service's own child indent, then scan ONLY the lines
+//! between that header and the end of its sub-block (the next non-blank,
+//! non-comment line whose indentation is `<=` the `environment:` line's own
+//! indent) for entries. A candidate line only counts as an entry if it sits
+//! at the entries' own indent (one level deeper than `environment:`), so
+//! text at other indents — a `depends_on:` list item that happens to share
+//! an env var's name, or a `KEY:`-looking line inside a deeper block-scalar
+//! value body — can never be mistaken for (or steal the line of) a real
+//! entry. Entries are matched in document order via a positional cursor that
+//! advances past each match, so duplicate keys (`- PORT=1` / `- PORT=2`)
+//! resolve to successive lines rather than both pointing at the first
+//! occurrence. A key that can't be found this way gets `line: None` rather
+//! than a guess.
 
 use serde_yaml::Value;
 
@@ -100,9 +113,28 @@ pub fn parse(content: &str) -> (Vec<ComposeService>, Vec<ParseError>) {
             .as_mapping()
             .and_then(|m| m.get("environment"))
         {
+            // `env_bounds` is `(entry_indent, entries_end)`: the indentation
+            // entries must sit at, and the exclusive end of the sub-block.
+            // `search_cursor` is the next 0-based line to start searching
+            // from; it advances past each match so duplicate keys land on
+            // successive lines rather than all re-finding the first one.
+            let env_bounds = block_start
+                .and_then(|start| find_environment_header(&lines, start, block_end))
+                .map(|header| {
+                    let env_indent = indent_of(lines[header]);
+                    let entries_end = next_line_at_or_above(&lines, header, env_indent);
+                    (header, env_indent + 2, entries_end)
+                });
+            let mut search_cursor = env_bounds.map(|(header, _, _)| header + 1);
+
             for (key, value) in collect_environment(environment) {
-                let line =
-                    block_start.and_then(|start| find_key_line(&lines, start, block_end, &key));
+                let line = env_bounds.and_then(|(_, entry_indent, entries_end)| {
+                    let start = search_cursor?;
+                    let (next, line) =
+                        find_entry_line(&lines, start, entries_end, entry_indent, &key)?;
+                    search_cursor = Some(next);
+                    Some(line)
+                });
                 entries.push(ComposeEntry { key, value, line });
             }
         }
@@ -158,6 +190,13 @@ fn is_service_header(line: &str, name: &str) -> bool {
 /// index of the next non-blank, non-comment line with indentation `<= 2`, or
 /// `lines.len()` if the block runs to end of file.
 fn block_end_line(lines: &[&str], start: usize) -> usize {
+    next_line_at_or_above(lines, start, 2)
+}
+
+/// 0-based exclusive end of the sub-block that begins right after `start`:
+/// the index of the next non-blank, non-comment line whose indentation is
+/// `<= threshold`, or `lines.len()` if the sub-block runs to end of file.
+fn next_line_at_or_above(lines: &[&str], start: usize, threshold: usize) -> usize {
     lines
         .iter()
         .enumerate()
@@ -167,20 +206,45 @@ fn block_end_line(lines: &[&str], start: usize) -> usize {
             if trimmed.is_empty() || trimmed.starts_with('#') {
                 return false;
             }
-            indent_of(line) <= 2
+            indent_of(line) <= threshold
         })
         .map(|(idx, _)| idx)
         .unwrap_or(lines.len())
 }
 
-/// Find the 1-based line number of `key` within the half-open line range
-/// `(start, end)` (0-based indices into `lines`; `start` is the service's
-/// own header line and is skipped since entries are always nested under it).
-fn find_key_line(lines: &[&str], start: usize, end: usize, key: &str) -> Option<u32> {
-    let end = end.min(lines.len());
-    (start + 1..end).find_map(|idx| {
-        let trimmed = lines[idx].trim();
-        matches_key(trimmed, key).then(|| (idx + 1) as u32)
+/// Find the 0-based index of the `environment:` header line within the
+/// half-open range `(block_start, block_end)`, at the service's own child
+/// indent (`indent_of(lines[block_start]) + 2`). Returns `None` if no such
+/// line is found, e.g. because the service block was itself never located.
+fn find_environment_header(lines: &[&str], block_start: usize, block_end: usize) -> Option<usize> {
+    let target_indent = indent_of(lines[block_start]) + 2;
+    let block_end = block_end.min(lines.len());
+    (block_start + 1..block_end)
+        .find(|&idx| indent_of(lines[idx]) == target_indent && lines[idx].trim() == "environment:")
+}
+
+/// Find the 1-based line number of `key` among the environment entries in
+/// the half-open range `(search_start, entries_end)` (0-based indices into
+/// `lines`), matching only lines that sit exactly at `entry_indent` — this
+/// is what keeps a `KEY:`-looking line inside a deeper block-scalar value
+/// body, or a line elsewhere at a different indent, from matching. Returns
+/// the matched 0-based index (so the caller can advance its search cursor
+/// past it, giving duplicate keys distinct lines) alongside the 1-based line
+/// number.
+fn find_entry_line(
+    lines: &[&str],
+    search_start: usize,
+    entries_end: usize,
+    entry_indent: usize,
+    key: &str,
+) -> Option<(usize, u32)> {
+    let entries_end = entries_end.min(lines.len());
+    (search_start..entries_end).find_map(|idx| {
+        let line = lines[idx];
+        if indent_of(line) != entry_indent {
+            return None;
+        }
+        matches_key(line.trim(), key).then(|| (idx + 1, (idx + 1) as u32))
     })
 }
 
@@ -212,6 +276,13 @@ fn collect_environment(environment: &Value) -> Vec<(String, Option<String>)> {
             .iter()
             .filter_map(|(key, value)| {
                 let key = key.as_str()?.to_string();
+                // A YAML merge key (`<<: *anchor`) surfaces here as a
+                // literal `"<<"` key whose value is the merged-in mapping,
+                // not an environment variable — skip it rather than
+                // emitting a garbage `<<` entry with value `None`.
+                if key == "<<" {
+                    return None;
+                }
                 Some((key, stringify_scalar(value)))
             })
             .collect();
@@ -450,6 +521,81 @@ mod tests {
                 name: "api".to_string(),
                 entries: Vec::new(),
             }]
+        );
+    }
+
+    #[test]
+    fn sibling_key_collision_uses_environment_line() {
+        // `depends_on` lists a service-ish-looking entry "PORT" (line 4)
+        // before the real `environment:` entry named PORT (line 6). The old
+        // whole-block text scan would find the `depends_on` line first;
+        // scoping the scan to the `environment:` sub-block fixes that.
+        let content = "services:\n  api:\n    depends_on:\n      - PORT\n    environment:\n      - PORT=8080\n";
+        let (services, errors) = parse(content);
+
+        assert!(errors.is_empty());
+        assert_eq!(
+            services,
+            vec![ComposeService {
+                name: "api".to_string(),
+                entries: vec![entry("PORT", Some("8080"), Some(6))],
+            }]
+        );
+    }
+
+    #[test]
+    fn block_scalar_body_not_matched() {
+        // The block-scalar value of MSG contains an indented line that looks
+        // like a `KEY:` entry (line 5). It sits deeper than the entries'
+        // indent, so indent-aware matching must skip it and attribute the
+        // real KEY entry to its own line (6), not the body line.
+        let content = "services:\n  api:\n    environment:\n      MSG: |\n        KEY: inside\n      KEY: value\n";
+        let (services, errors) = parse(content);
+
+        assert!(errors.is_empty());
+        assert_eq!(services.len(), 1);
+        assert_eq!(
+            services[0].entries,
+            vec![
+                entry("MSG", Some("KEY: inside\n"), Some(4)),
+                entry("KEY", Some("value"), Some(6)),
+            ]
+        );
+    }
+
+    #[test]
+    fn duplicate_list_keys_distinct_lines() {
+        // Two list-form entries with the same key must resolve to their own
+        // distinct lines via the positional search cursor, not both to the
+        // first occurrence.
+        let content = "services:\n  api:\n    environment:\n      - PORT=1\n      - PORT=2\n";
+        let (services, errors) = parse(content);
+
+        assert!(errors.is_empty());
+        assert_eq!(services.len(), 1);
+        assert_eq!(
+            services[0].entries,
+            vec![
+                entry("PORT", Some("1"), Some(4)),
+                entry("PORT", Some("2"), Some(5)),
+            ]
+        );
+    }
+
+    #[test]
+    fn merge_key_skipped() {
+        // `<<: *defaults` is a YAML merge key; serde_yaml surfaces it in the
+        // mapping as a literal "<<" key whose value is the merged-in
+        // mapping (a non-scalar), not an environment variable. It must be
+        // skipped entirely rather than emitted as a garbage entry.
+        let content = "defaults: &defaults\n  A: \"1\"\nservices:\n  api:\n    environment:\n      <<: *defaults\n      KEY: value\n";
+        let (services, errors) = parse(content);
+
+        assert!(errors.is_empty());
+        assert_eq!(services.len(), 1);
+        assert_eq!(
+            services[0].entries,
+            vec![entry("KEY", Some("value"), Some(7))]
         );
     }
 }
