@@ -132,7 +132,7 @@ pub fn resolve(
             });
 
             let mut effective = None;
-            for (_, occurrence) in &keyed_occurrences {
+            for (_, occurrence) in &mut keyed_occurrences {
                 let Some(source) = source_by_id.get(occurrence.source_id.as_str()) else {
                     continue;
                 };
@@ -141,7 +141,8 @@ pub fn resolve(
                 }
                 if occurrence.is_inherited {
                     if let Some(value) = process_values.get(occurrence.key.as_str()) {
-                        effective = Some((value.clone(), occurrence.source_id.clone()));
+                        occurrence.no_expand = value.no_expand;
+                        effective = Some((value.value.clone(), occurrence.source_id.clone()));
                     }
                 } else if let Some(value) = &occurrence.parsed_value {
                     effective = Some((value.clone(), occurrence.source_id.clone()));
@@ -419,10 +420,15 @@ fn line_orders_document_position(
         && left_source.path == right_source.path
 }
 
+struct ProcessValue {
+    value: String,
+    no_expand: bool,
+}
+
 fn process_values(
     occurrences: &[VariableOccurrence],
     source_by_id: &BTreeMap<&str, &EnvSource>,
-) -> BTreeMap<String, String> {
+) -> BTreeMap<String, ProcessValue> {
     let mut values = BTreeMap::new();
     for occurrence in occurrences {
         if let Some(source) = source_by_id.get(occurrence.source_id.as_str())
@@ -430,23 +436,30 @@ fn process_values(
             && source.enabled
             && let Some(value) = &occurrence.parsed_value
         {
-            values.insert(occurrence.key.clone(), value.clone());
+            values.insert(
+                occurrence.key.clone(),
+                ProcessValue {
+                    value: value.clone(),
+                    no_expand: occurrence.no_expand,
+                },
+            );
         }
     }
     values
 }
 
-fn reference_regex() -> Option<&'static Regex> {
-    static RE: OnceLock<Result<Regex, regex::Error>> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\$\{([A-Za-z_][A-Za-z0-9_.]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)\b"))
-        .as_ref()
-        .ok()
+fn reference_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        match Regex::new(r"\$\{([A-Za-z_][A-Za-z0-9_.]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)\b") {
+            Ok(regex) => regex,
+            Err(err) => panic!("reference regex constant is invalid: {err}"),
+        }
+    })
 }
 
 fn referenced_keys(value: &str) -> Vec<String> {
-    let Some(re) = reference_regex() else {
-        return Vec::new();
-    };
+    let re = reference_regex();
     re.captures_iter(value)
         .filter_map(|captures| {
             captures
@@ -553,11 +566,7 @@ impl Expansion<'_> {
             return value;
         }
 
-        let Some(re) = reference_regex() else {
-            let value = restore_escaped_dollars(original);
-            self.memo[idx] = Some(value.clone());
-            return value;
-        };
+        let re = reference_regex();
 
         let mut output = String::new();
         let mut last = 0;
@@ -1352,6 +1361,43 @@ mod tests {
         let vars = resolve(&sources, occurrences);
 
         assert_eq!(effective(&vars, "DATABASE_URL"), None);
+    }
+
+    #[test]
+    fn inherited_process_value_keeps_process_no_expand_when_compose_wins() {
+        let mut config = Config::default();
+        config.profiles.insert(
+            "compose-wins".to_string(),
+            Profile {
+                include: vec!["process".to_string(), "compose".to_string()],
+            },
+        );
+        let mut sources = vec![
+            source(
+                "docker-compose.yml[api]",
+                SourceKind::Compose,
+                Some("docker-compose.yml"),
+            ),
+            source("process", SourceKind::Process, None),
+        ];
+        let occurrences = vec![
+            inherited_occ("DATABASE_URL", "docker-compose.yml[api]", 5),
+            process_occ("DATABASE_URL", "postgres://${HOST}/db"),
+            process_occ("HOST", "localhost"),
+        ];
+
+        rank_sources(&mut sources, &config, Some("compose-wins"), None).unwrap();
+        let mut vars = resolve(&sources, occurrences);
+        let diagnostics = expand_references(&mut vars);
+
+        assert!(diagnostics.is_empty());
+        assert_eq!(
+            effective(&vars, "DATABASE_URL"),
+            Some(&(
+                "postgres://${HOST}/db".to_string(),
+                "docker-compose.yml[api]".to_string()
+            ))
+        );
     }
 
     #[test]
