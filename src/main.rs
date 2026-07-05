@@ -3,12 +3,9 @@ use std::process::ExitCode;
 use clap::Parser;
 use envlens::cli::{Cli, Command};
 use envlens::config::Config;
-use envlens::core::model::{Analysis, Severity, SourceKind};
-use envlens::core::secrets::{MaskedValue, classify_value};
+use envlens::core::model::{Analysis, Severity};
 use envlens::core::{AnalyzeError, External};
-use regex::Regex;
-use serde_json::json;
-use std::sync::OnceLock;
+use envlens::report::{generated_at, render_check_human, sanitize_text};
 
 fn main() -> ExitCode {
     install_panic_hook();
@@ -62,9 +59,17 @@ fn run(mut cli: Cli) -> Result<u8, (u8, String)> {
                 .unwrap_or_else(|| ".".into());
             let analysis = analyze_for_cli(&root, &cli)?;
             if json {
-                println!("{}", minimal_json(&analysis, no_values)?);
+                let generated_at = generated_at(source_date_epoch());
+                println!(
+                    "{}",
+                    envlens::report::json::render(&analysis, generated_at, no_values)
+                        .map_err(|err| (4, format!("could not serialize analysis: {err}")))?
+                );
             } else {
-                print_human_check(&analysis);
+                print!(
+                    "{}",
+                    render_check_human(&analysis, should_color_output(&cli))
+                );
             }
             Ok(check_exit_code(&analysis, strict))
         }
@@ -77,6 +82,17 @@ fn run(mut cli: Cli) -> Result<u8, (u8, String)> {
             Ok(4)
         }
     }
+}
+
+fn source_date_epoch() -> Option<u64> {
+    match std::env::var("SOURCE_DATE_EPOCH") {
+        Ok(value) => value.parse::<u64>().ok(),
+        Err(_) => None,
+    }
+}
+
+fn should_color_output(cli: &Cli) -> bool {
+    !cli.no_color && std::env::var_os("NO_COLOR").is_none()
 }
 
 fn analyze_for_cli(root: &std::path::Path, cli: &Cli) -> Result<Analysis, (u8, String)> {
@@ -124,122 +140,5 @@ fn check_exit_code(analysis: &Analysis, strict: bool) -> u8 {
         1
     } else {
         0
-    }
-}
-
-fn print_human_check(analysis: &Analysis) {
-    for diagnostic in &analysis.diagnostics {
-        println!(
-            "{:?} {:?} {}",
-            diagnostic.severity,
-            diagnostic.code,
-            sanitize_text(&diagnostic.message)
-        );
-    }
-}
-
-fn minimal_json(analysis: &Analysis, no_values: bool) -> Result<String, (u8, String)> {
-    let sources: Vec<_> = analysis
-        .sources
-        .iter()
-        .map(|source| {
-            json!({
-                "id": source.id,
-                "kind": source_kind(source.kind),
-                "path": source.path.as_ref().map(|path| path.to_string_lossy().into_owned()),
-                "context": source.context,
-                "precedence": source.precedence,
-                "enabled": source.enabled,
-                "errors": source.errors.iter().map(|error| {
-                    json!({
-                        "line": error.line,
-                        "message": sanitize_text(&error.message),
-                    })
-                }).collect::<Vec<_>>(),
-            })
-        })
-        .collect();
-
-    let variables: Vec<_> = analysis
-        .variables
-        .iter()
-        .map(|var| {
-            let effective = if no_values {
-                var.effective
-                    .as_ref()
-                    .map(|(_, source_id)| json!({ "source_id": source_id }))
-            } else {
-                var.effective.as_ref().map(|(value, source_id)| {
-                    json!({
-                        "value": MaskedValue::new(value.clone(), var.is_secret_like, false).to_string(),
-                        "source_id": source_id,
-                    })
-                })
-            };
-            json!({
-                "key": var.key,
-                "effective": effective,
-                "is_required": var.is_required,
-                "is_missing": var.is_missing,
-                "is_secret_like": var.is_secret_like,
-                "diagnostics": var.diagnostics.iter().map(diagnostic_json).collect::<Vec<_>>(),
-            })
-        })
-        .collect();
-
-    serde_json::to_string_pretty(&json!({
-        "root": analysis.root.to_string_lossy(),
-        "profile": analysis.profile,
-        "sources": sources,
-        "variables": variables,
-        "diagnostics": analysis.diagnostics.iter().map(diagnostic_json).collect::<Vec<_>>(),
-    }))
-    .map_err(|err| (4, format!("could not serialize analysis: {err}")))
-}
-
-fn diagnostic_json(diagnostic: &envlens::core::model::Diagnostic) -> serde_json::Value {
-    json!({
-        "severity": diagnostic.severity,
-        "code": diagnostic.code,
-        "message": sanitize_text(&diagnostic.message),
-        "key": diagnostic.key,
-        "source_id": diagnostic.source_id,
-        "line": diagnostic.line,
-    })
-}
-
-fn sanitize_text(text: &str) -> String {
-    secret_token_regex()
-        .replace_all(text, |captures: &regex::Captures<'_>| {
-            let token = captures
-                .get(0)
-                .map(|matched| matched.as_str())
-                .unwrap_or("");
-            if classify_value(token) {
-                MaskedValue::new(token, true, false).to_string()
-            } else {
-                token.to_string()
-            }
-        })
-        .into_owned()
-}
-
-fn secret_token_regex() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| match Regex::new(r"[A-Za-z0-9_./:@+=-]{8,}") {
-        Ok(regex) => regex,
-        Err(err) => panic!("secret redaction regex constant is invalid: {err}"),
-    })
-}
-
-fn source_kind(kind: SourceKind) -> &'static str {
-    match kind {
-        SourceKind::Dotenv => "dotenv",
-        SourceKind::DotenvExample => "dotenv_example",
-        SourceKind::Compose => "compose",
-        SourceKind::PackageScript => "package_script",
-        SourceKind::Manifest => "manifest",
-        SourceKind::Process => "process",
-        SourceKind::Ci => "ci",
     }
 }

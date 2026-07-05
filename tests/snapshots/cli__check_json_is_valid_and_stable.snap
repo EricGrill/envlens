@@ -1,0 +1,361 @@
+---
+source: tests/cli.rs
+expression: snapshot
+---
+{
+  "version": 1,
+  "generated_at": "1970-01-01T00:00:00Z",
+  "root": "tests/fixtures/basic",
+  "profile": "default",
+  "summary": {
+    "sources": 4,
+    "variables": 8,
+    "errors": 2,
+    "warnings": 2,
+    "infos": 1,
+    "secrets": 3,
+    "missing_required": 2
+  },
+  "sources": [
+    {
+      "id": ".env.example",
+      "kind": "dotenv_example",
+      "path": ".env.example",
+      "context": null,
+      "precedence": 10,
+      "enabled": true,
+      "errors": []
+    },
+    {
+      "id": ".env",
+      "kind": "dotenv",
+      "path": ".env",
+      "context": null,
+      "precedence": 20,
+      "enabled": true,
+      "errors": []
+    },
+    {
+      "id": ".env.local",
+      "kind": "dotenv",
+      "path": ".env.local",
+      "context": null,
+      "precedence": 30,
+      "enabled": true,
+      "errors": []
+    },
+    {
+      "id": "process",
+      "kind": "process",
+      "path": null,
+      "context": null,
+      "precedence": 40,
+      "enabled": true,
+      "errors": []
+    }
+  ],
+  "variables": [
+    {
+      "key": "API_URL",
+      "effective": {
+        "source_id": ".env",
+        "value": "${HOST}:5001"
+      },
+      "occurrences": [
+        {
+          "source_id": ".env",
+          "line": 4,
+          "raw": "${HOST}:${PORT}",
+          "value": "${HOST}:${PORT}",
+          "is_empty": false,
+          "is_inherited": false,
+          "no_expand": false,
+          "secret": "none"
+        }
+      ],
+      "is_required": false,
+      "is_missing": false,
+      "is_secret_like": false,
+      "diagnostics": [
+        {
+          "severity": "warning",
+          "code": "undefined_reference",
+          "message": "API_URL references undefined variable HOST",
+          "key": "API_URL",
+          "source_id": ".env",
+          "line": 4
+        }
+      ]
+    },
+    {
+      "key": "DATABASE_URL",
+      "effective": {
+        "source_id": ".env",
+        "value": "••••••••••pp"
+      },
+      "occurrences": [
+        {
+          "source_id": ".env.example",
+          "line": 3,
+          "raw": "",
+          "value": "",
+          "is_empty": true,
+          "is_inherited": false,
+          "no_expand": false,
+          "secret": "none"
+        },
+        {
+          "source_id": ".env",
+          "line": 3,
+          "raw": "••••••••••pp",
+          "value": "••••••••••pp",
+          "is_empty": false,
+          "is_inherited": false,
+          "no_expand": false,
+          "secret": "value_like"
+        }
+      ],
+      "is_required": true,
+      "is_missing": false,
+      "is_secret_like": true,
+      "diagnostics": []
+    },
+    {
+      "key": "JWT_SECRET",
+      "occurrences": [
+        {
+          "source_id": ".env.example",
+          "line": 4,
+          "raw": "••••••••",
+          "value": "••••••••",
+          "is_empty": true,
+          "is_inherited": false,
+          "no_expand": false,
+          "secret": "key_like"
+        }
+      ],
+      "is_required": true,
+      "is_missing": true,
+      "is_secret_like": true,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "missing_required",
+          "message": "JWT_SECRET is required but is not defined in any enabled value-bearing source.",
+          "key": "JWT_SECRET",
+          "source_id": null,
+          "line": null
+        }
+      ]
+    },
+    {
+      "key": "NODE_ENV",
+      "effective": {
+        "source_id": ".env",
+        "value": "development"
+      },
+      "occurrences": [
+        {
+          "source_id": ".env.example",
+          "line": 1,
+          "raw": "",
+          "value": "",
+          "is_empty": true,
+          "is_inherited": false,
+          "no_expand": false,
+          "secret": "none"
+        },
+        {
+          "source_id": ".env",
+          "line": 1,
+          "raw": "development",
+          "value": "development",
+          "is_empty": false,
+          "is_inherited": false,
+          "no_expand": false,
+          "secret": "none"
+        }
+      ],
+      "is_required": true,
+      "is_missing": false,
+      "is_secret_like": false,
+      "diagnostics": []
+    },
+    {
+      "key": "PORT",
+      "effective": {
+        "source_id": ".env.local",
+        "value": "5001"
+      },
+      "occurrences": [
+        {
+          "source_id": ".env.example",
+          "line": 2,
+          "raw": "",
+          "value": "",
+          "is_empty": true,
+          "is_inherited": false,
+          "no_expand": false,
+          "secret": "none"
+        },
+        {
+          "source_id": ".env",
+          "line": 2,
+          "raw": "3000",
+          "value": "3000",
+          "is_empty": false,
+          "is_inherited": false,
+          "no_expand": false,
+          "secret": "none"
+        },
+        {
+          "source_id": ".env.local",
+          "line": 1,
+          "raw": "5001",
+          "value": "5001",
+          "is_empty": false,
+          "is_inherited": false,
+          "no_expand": false,
+          "secret": "none"
+        }
+      ],
+      "is_required": true,
+      "is_missing": false,
+      "is_secret_like": false,
+      "diagnostics": [
+        {
+          "severity": "warning",
+          "code": "conflicting_values",
+          "message": "PORT differs across sources: .env:2 (3000), .env.local:1 (5001). Effective value is 5001 from .env.local.",
+          "key": "PORT",
+          "source_id": ".env.local",
+          "line": 1
+        },
+        {
+          "severity": "info",
+          "code": "shadowed_value",
+          "message": "PORT from .env:2 (3000) is shadowed by .env.local:1 (5001).",
+          "key": "PORT",
+          "source_id": ".env",
+          "line": 2
+        }
+      ]
+    },
+    {
+      "key": "REDIS_URL",
+      "occurrences": [
+        {
+          "source_id": ".env.example",
+          "line": 5,
+          "raw": "",
+          "value": "",
+          "is_empty": true,
+          "is_inherited": false,
+          "no_expand": false,
+          "secret": "none"
+        }
+      ],
+      "is_required": true,
+      "is_missing": true,
+      "is_secret_like": false,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "missing_required",
+          "message": "REDIS_URL is required but is not defined in any enabled value-bearing source.",
+          "key": "REDIS_URL",
+          "source_id": null,
+          "line": null
+        }
+      ]
+    },
+    {
+      "key": "SOURCE_DATE_EPOCH",
+      "effective": {
+        "source_id": "process",
+        "value": "0"
+      },
+      "occurrences": [
+        {
+          "source_id": "process",
+          "line": null,
+          "raw": "0",
+          "value": "0",
+          "is_empty": false,
+          "is_inherited": false,
+          "no_expand": true,
+          "secret": "none"
+        }
+      ],
+      "is_required": false,
+      "is_missing": false,
+      "is_secret_like": false,
+      "diagnostics": []
+    },
+    {
+      "key": "STRIPE_API_KEY",
+      "effective": {
+        "source_id": ".env.local",
+        "value": "sk_••••••••••78"
+      },
+      "occurrences": [
+        {
+          "source_id": ".env.local",
+          "line": 2,
+          "raw": "sk_••••••••••78",
+          "value": "sk_••••••••••78",
+          "is_empty": false,
+          "is_inherited": false,
+          "no_expand": false,
+          "secret": "both"
+        }
+      ],
+      "is_required": false,
+      "is_missing": false,
+      "is_secret_like": true,
+      "diagnostics": []
+    }
+  ],
+  "diagnostics": [
+    {
+      "severity": "error",
+      "code": "missing_required",
+      "message": "JWT_SECRET is required but is not defined in any enabled value-bearing source.",
+      "key": "JWT_SECRET",
+      "source_id": null,
+      "line": null
+    },
+    {
+      "severity": "error",
+      "code": "missing_required",
+      "message": "REDIS_URL is required but is not defined in any enabled value-bearing source.",
+      "key": "REDIS_URL",
+      "source_id": null,
+      "line": null
+    },
+    {
+      "severity": "warning",
+      "code": "undefined_reference",
+      "message": "API_URL references undefined variable HOST",
+      "key": "API_URL",
+      "source_id": ".env",
+      "line": 4
+    },
+    {
+      "severity": "warning",
+      "code": "conflicting_values",
+      "message": "PORT differs across sources: .env:2 (3000), .env.local:1 (5001). Effective value is 5001 from .env.local.",
+      "key": "PORT",
+      "source_id": ".env.local",
+      "line": 1
+    },
+    {
+      "severity": "info",
+      "code": "shadowed_value",
+      "message": "PORT from .env:2 (3000) is shadowed by .env.local:1 (5001).",
+      "key": "PORT",
+      "source_id": ".env",
+      "line": 2
+    }
+  ]
+}

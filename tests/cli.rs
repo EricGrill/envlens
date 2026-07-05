@@ -88,6 +88,164 @@ fn source_filter_reaches_output() {
 }
 
 #[test]
+fn check_json_is_valid_and_stable() {
+    let output = cmd()
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("SOURCE_DATE_EPOCH", "0")
+        .args(["check", "--json", "tests/fixtures/basic"])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("valid json");
+
+    assert_eq!(json["version"], 1);
+    assert_eq!(json["generated_at"], "1970-01-01T00:00:00Z");
+    assert_eq!(json["root"], "tests/fixtures/basic");
+    assert_eq!(json["profile"], "default");
+    assert!(json["summary"]["errors"].as_u64().unwrap_or(0) > 0);
+
+    let process_keys: Vec<_> = json["variables"]
+        .as_array()
+        .expect("variables array")
+        .iter()
+        .filter(|variable| {
+            variable["occurrences"]
+                .as_array()
+                .expect("occurrences array")
+                .iter()
+                .any(|occurrence| occurrence["source_id"] == "process")
+        })
+        .map(|variable| variable["key"].as_str().unwrap_or(""))
+        .collect();
+    assert_eq!(process_keys, vec!["SOURCE_DATE_EPOCH"]);
+
+    let snapshot = serde_json::to_string_pretty(&json).expect("json formats");
+    insta::assert_snapshot!("check_json_is_valid_and_stable", snapshot);
+}
+
+#[test]
+fn check_exit_1_on_errors() {
+    cmd()
+        .args(["check", "tests/fixtures/basic"])
+        .assert()
+        .code(1);
+
+    cmd()
+        .args(["check", "tests/fixtures/compose"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn determinism_byte_identical() {
+    let first = cmd()
+        .env("SOURCE_DATE_EPOCH", "0")
+        .args(["check", "--json", "tests/fixtures/basic"])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+    let second = cmd()
+        .env("SOURCE_DATE_EPOCH", "0")
+        .args(["check", "--json", "tests/fixtures/basic"])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+
+    assert_eq!(first, second);
+}
+
+#[test]
+fn no_values_truly_value_free() {
+    let output = cmd()
+        .env("SOURCE_DATE_EPOCH", "0")
+        .args(["check", "--json", "--no-values", "tests/fixtures/basic"])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8_lossy(&output);
+    for raw in ["5001", "secret123", "sk_live_"] {
+        assert!(!stdout.contains(raw), "output leaked {raw}: {stdout}");
+    }
+
+    let json: Value = serde_json::from_slice(&output).expect("valid json");
+    assert_no_value_keys(&json);
+}
+
+#[test]
+fn planted_secret_never_unmasked() {
+    let json_output = cmd()
+        .env("SOURCE_DATE_EPOCH", "0")
+        .args(["check", "--json", "tests/fixtures/basic"])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+    let json_stdout = String::from_utf8_lossy(&json_output);
+
+    let human_output = cmd()
+        .args(["check", "tests/fixtures/basic"])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+    let human_stdout = String::from_utf8_lossy(&human_output);
+
+    for raw in ["envlensFakeHistoricalSecret", "secret123"] {
+        assert!(
+            !json_stdout.contains(raw),
+            "json leaked raw secret {raw}: {json_stdout}"
+        );
+        assert!(
+            !human_stdout.contains(raw),
+            "human output leaked raw secret {raw}: {human_stdout}"
+        );
+    }
+}
+
+#[test]
+fn empty_dir_exit_0() {
+    let output = cmd()
+        .env("SOURCE_DATE_EPOCH", "0")
+        .args(["check", "--json", "tests/fixtures/empty"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("valid json");
+    let sources: Vec<_> = json["sources"]
+        .as_array()
+        .expect("sources array")
+        .iter()
+        .map(|source| source["id"].as_str().unwrap_or(""))
+        .collect();
+    assert_eq!(sources, vec!["process"]);
+}
+
+#[test]
+fn check_human_output_readable() {
+    let output = cmd()
+        .args(["check", "--no-color", "tests/fixtures/basic"])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8_lossy(&output);
+    insta::assert_snapshot!("check_human_output_readable", stdout);
+}
+
+#[test]
 fn malformed_secret_never_leaks_json_or_human() {
     let raw = "envlensFakeHistoricalSecret";
 
@@ -228,4 +386,23 @@ fn panic_hook_exits_4() {
     let stderr = String::from_utf8_lossy(&output);
     assert!(stderr.contains("internal error:"));
     assert!(stderr.contains("forced envlens test panic"));
+}
+
+fn assert_no_value_keys(value: &Value) {
+    match value {
+        Value::Object(map) => {
+            for (key, child) in map {
+                assert_ne!(key, "value");
+                assert_ne!(key, "effective");
+                assert_ne!(key, "raw");
+                assert_no_value_keys(child);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                assert_no_value_keys(item);
+            }
+        }
+        _ => {}
+    }
 }

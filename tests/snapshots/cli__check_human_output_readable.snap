@@ -1,0 +1,11 @@
+---
+source: tests/cli.rs
+expression: stdout
+---
+error JWT_SECRET JWT_SECRET is required but is not defined in any enabled value-bearing source.
+error REDIS_URL REDIS_URL is required but is not defined in any enabled value-bearing source.
+warning API_URL API_URL references undefined variable HOST
+warning PORT PORT differs across sources: .env:2 (3000), .env.local:1 (5001). Effective value is 5001 from .env.local.
+info PORT PORT from .env:2 (3000) is shadowed by .env.local:1 (5001).
+
+summary: 2 errors, 2 warnings, 1 infos, 7 variables, 4 sources
