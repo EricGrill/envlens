@@ -3,8 +3,10 @@
 //! into [`crate::core::model::VariableOccurrence`]s is added alongside the
 //! consumers that need it.
 
+pub mod ci;
 pub mod compose;
 pub mod dotenv;
+pub mod package_json;
 pub mod process;
 
 use std::collections::BTreeMap;
