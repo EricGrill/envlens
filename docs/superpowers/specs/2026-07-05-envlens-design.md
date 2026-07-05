@@ -37,7 +37,7 @@ src/
   cli.rs             clap derive definitions
   config.rs          .envlens.yml discovery, parsing, merge
   core/
-    mod.rs           pub fn analyze(root, &Config, profile) -> Analysis
+    mod.rs           pub fn analyze(root, &Config, profile, tracked_files) -> Analysis
     scanner.rs       file discovery + classification
     model.rs         data types (§4)
     parsers/
@@ -69,7 +69,7 @@ src/
 
 `Analysis` contains: sources (with parse errors), variable summaries (sorted by key), diagnostics, and the resolved profile/precedence used. The TUI, `check`, and `report` all consume `Analysis`; nothing downstream re-derives semantic facts. Re-running `analyze` on identical inputs yields identical output (NFR-019); all maps iterate in sorted or insertion order (`BTreeMap`/`Vec`, never `HashMap` iteration into output). `Analysis` itself contains no timestamps; report timestamps are added at the frontend boundary from a clock that honors `SOURCE_DATE_EPOCH` (reproducible-builds convention), which is how the byte-identical determinism test in §14 passes while normal runs still show a real timestamp.
 
-Core performs no process spawning and no I/O beyond reading discovered files and `std::env::vars_os()`. Facts that require external processes are passed *into* `analyze` as data: the frontend runs `git ls-files -z` (only when a `.git` directory exists at the root) and supplies `tracked_files: Option<BTreeSet<PathBuf>>`; `None` (git absent or command failed) simply disables the `SecretInTrackedFile` rule.
+Core performs no process spawning and no I/O beyond reading discovered files and `std::env::vars_os()`. Facts that require external processes are passed *into* `analyze` as data: the frontend runs `git ls-files -z` whenever a `.git` entry of any type exists at the root (worktrees and submodules use a `.git` *file*) and supplies `tracked_files: Option<BTreeSet<PathBuf>>`; `None` (git absent or command failed for any reason) simply disables the `SecretInTrackedFile` rule.
 
 ### Dependencies
 
@@ -127,7 +127,7 @@ struct Diagnostic {
 
 `DiagnosticCode` is a closed enum matching SRS §8 exactly: `DuplicateKey`, `ConflictingValues`, `MissingRequired`, `EmptyRequired`, `UndefinedReference`, `CircularReference`, `InvalidDotenvLine`, `SecretInTrackedFile`, `InheritedUnresolved`, `ShadowedValue`. (`SecretInTrackedFile` fires only when the frontend supplied `tracked_files` per §3; if git is absent the code is never emitted. This keeps SRS §8 complete without importing §6.6 git-awareness scope.)
 
-Deliberate adaptations of the SRS §7 TypeScript model: FR-019's per-occurrence "warning list" is realized as `Diagnostic`s carrying `source_id` + `line` (the details pane joins them back to occurrences); the SRS `parsedAt` field is dropped because it would violate NFR-019 determinism; the SRS `"config"` source type is unused in v0.1 (nothing parses env vars out of `.envlens.yml` itself).
+Deliberate adaptations of the SRS §7 TypeScript model: FR-019's per-occurrence "warning list" is realized as `Diagnostic`s carrying `source_id` + `line` (the details pane joins them back to occurrences); the SRS `parsedAt` field is dropped because it would violate NFR-019 determinism; the SRS `"config"` source type is unused in v0.1 (nothing parses env vars out of `.envlens.yml` itself). The FR-028 empty/undefined/inherited/unresolved distinction is derived from `is_empty` + `is_inherited` on the occurrence plus joined `UndefinedReference`/`InheritedUnresolved` diagnostics — there is no separate per-occurrence status enum.
 
 ## 5. Scanning and discovery
 
@@ -144,7 +144,7 @@ Deliberate adaptations of the SRS §7 TypeScript model: FR-019's per-occurrence 
 ### Same-rank ordering (deterministic tie-breaks)
 
 - Dotenv files of the same rank (e.g. two `.env.local` in different subdirectories): shallower path first, then lexicographic path order; the later one wins.
-- Compose: base files (`docker-compose.yml|yaml`, `compose.yml|yaml`) share one rank; `docker-compose.override.yml|yaml` ranks **above** its base, matching Compose's own override semantics. Within one file, services are sub-sources in document order.
+- Compose: base files (`docker-compose.yml|yaml`, `compose.yml|yaml`) share one rank; multiple base files (side-by-side variants or different directories) order by the dotenv path rule. `docker-compose.override.yml|yaml` binds to the base file **in its own directory** and ranks immediately above it. Within one file, services are sub-sources in document order.
 - Package scripts: sub-sources `package.json[<script>]` ordered by document order of the scripts map; multiple `package.json` files order by the dotenv path rule.
 - Where sub-sources of the same file define the same key with different values (two compose services, two scripts), the *last* sub-source in the above order supplies the source's candidate for effective-value resolution, and the difference is reported at info severity (§2 decisions).
 
@@ -175,7 +175,7 @@ Snapshot of `std::env::vars_os()`, lossy-decoded, sorted by key. No line numbers
 ## 7. Precedence, profiles, references
 
 - Default precedence, lowest → highest, per FR-021: `.env` < `.env.local` < `.env.development` < `.env.development.local` < `.env.test` < `.env.test.local` < `.env.production` < `.env.production.local` < compose < package scripts < process. Example/template sources have no precedence (they define requirements, not values). CI sources also carry no precedence in v0.1 — they are informational occurrences flagged in details, never effective values.
-- Profiles (FR-023, FR-055): a profile is an ordered include-list of source ids/patterns. Built-ins: `dev` (`.env`, `.env.local`, `.env.development`, `.env.development.local`, compose, scripts, process), `test` (`.env`, `.env.test`, `.env.test.local`, process), `production` (`.env`, `.env.production`, `.env.production.local`, compose, process). Config `profiles:` overrides/extends. `--profile X` selects; default is "all sources, default precedence".
+- Profiles (FR-023, FR-055): a profile is an ordered include-list of source ids/patterns. The list order **is** the precedence order for the included sources (lowest → highest, same convention as `precedence:` and FR-021); if the config also sets `precedence:`, that key wins for the sources it names. Built-ins: `dev` (`.env`, `.env.local`, `.env.development`, `.env.development.local`, compose, scripts, process), `test` (`.env`, `.env.test`, `.env.test.local`, process), `production` (`.env`, `.env.production`, `.env.production.local`, compose, process). Config `profiles:` overrides/extends. `--profile X` selects; default is "all sources, default precedence".
 - Custom precedence (FR-022, FR-054): config `precedence:` is an ordered list of source names; listed sources rank in that order above unlisted ones, which keep default relative order below.
 - Effective value (FR-021): highest-precedence enabled occurrence with a defined value; `is_inherited` occurrences resolve through the process value if present.
 - References (FR-029–031): `${VAR}` and `$VAR` (word boundary) in parsed values, except inside single quotes. Expansion resolves against effective values of the active overlay. Undefined → `UndefinedReference` warning and the reference is left verbatim in the expanded value. Cycles detected by DFS over the reference graph → `CircularReference` error on each participating key; cyclic references are not expanded. `\$` escapes expansion in double quotes.
@@ -184,13 +184,15 @@ Snapshot of `std::env::vars_os()`, lossy-decoded, sorted by key. No line numbers
 
 All rules run over the `Analysis` in one pass, emitting SRS §8 codes with actionable messages in the NFR-012 style, e.g. `PORT differs across sources: .env:3 (3000), docker-compose.yml[api]:12 (5001). Effective value is 5001 from docker-compose.yml[api].`
 
+Diagnostic messages embed values, so **message composition renders every value through the masking function** — for a secret-like key the message reads `JWT_SECRET differs across sources: .env:2 (••••••••3a), .env.local:5 (••••••••8F)`. This closes the path around the `MaskedValue` report boundary (NFR-005); the §14 secrets fixture includes a *conflicting* secret-like key specifically to regression-test it.
+
 | Rule | Notes |
 |---|---|
 | `DuplicateKey` (warning) | Same key twice in one source (any parsed source, including example and CI files); last occurrence wins within the source; both are recorded. |
 | `ConflictingValues` (warning) | ≥2 distinct defined values across different enabled *value-bearing* sources (dotenv, compose, scripts, process). Example and CI sources never participate — examples are requirements, CI occurrences are informational context shown in the details pane only. Cross-service/cross-script same-file differences downgrade to info (§2 decisions, §5 same-rank ordering). |
 | `ShadowedValue` (info) | Any value-bearing occurrence overridden by a higher-precedence one with a different or equal value. Example/CI occurrences neither shadow nor are shadowed. |
-| `MissingRequired` (error) | Required key (from example files + config `required:`) with no defined occurrence in enabled non-example sources. |
-| `EmptyRequired` (warning) | Required key defined but empty everywhere it appears. |
+| `MissingRequired` (error) | Required key (from example files + config `required:`) with no defined occurrence in enabled *value-bearing* sources (dotenv, compose, scripts, process — same scoping as `ConflictingValues`; a key defined only in a CI file is still missing). |
+| `EmptyRequired` (warning) | Required key defined in value-bearing sources but empty in all of them. |
 | `UndefinedReference` (warning) | See §7. |
 | `CircularReference` (error) | See §7. |
 | `InvalidDotenvLine` (warning) | From parser errors. |
@@ -233,7 +235,7 @@ envlens check  [PATH] [--json] [--strict] [--no-values] [common flags]
 envlens report [PATH] --format markdown|json [--out FILE] [--no-values] [common flags]
 ```
 
-Flag interactions: `--source` intersects with the active profile's include list (a profile selects the candidate set; `--source` narrows it further; naming a source outside the profile is a usage error, exit 2). `--no-values` applies to both `check --json` and `report` (both formats). An empty project (no sources discovered beyond `process`) is not an error: the TUI opens with the sources pane showing `process` and a "no project env sources found" notice; `check` reports zero findings and exits 0 unless config `required:` entries are missing (then normal diagnostics apply).
+Flag interactions: `--source` intersects with the active profile's include list (a profile selects the candidate set; `--source` narrows it further). Naming a source outside the profile, or one that does not exist in the project, is a usage error → exit 2, even though this validation runs after clap (exit 2 means "the invocation is wrong", not "clap said so"). `--strict` overrides config `fail_on:` when both are present. `--no-values` applies to both `check --json` and `report` (both formats). An empty project (no sources discovered beyond `process`) is not an error: the TUI opens with the sources pane showing `process` and a "no project env sources found" notice; `check` reports zero findings and exits 0 unless config `required:` entries are missing (then normal diagnostics apply).
 
 - Bare `envlens` opens the TUI (FR-044). `check` prints human-readable diagnostics (or `--json`) and exits per threshold (FR-045). `report` writes sanitized markdown per SRS §11 or JSON.
 - Exit codes (FR-046): 0 no findings ≥ threshold; 1 findings ≥ threshold (threshold = error, or warning with `--strict`/`fail_on: warning`); 2 CLI usage error (clap); 3 environment failure — target path missing/unreadable, i.e. no analysis possible (per-file parse errors are diagnostics, not exit 3); 4 internal error via panic hook (message passes through masking, exits 4).
