@@ -46,6 +46,8 @@ fn run(mut cli: Cli) -> Result<u8, (u8, String)> {
     let command = cli.command.take();
     match command {
         None => {
+            let root = cli.path.clone().unwrap_or_else(|| ".".into());
+            let _analysis = analyze_for_cli(&root, &cli)?;
             eprintln!("TUI not yet implemented");
             Ok(4)
         }

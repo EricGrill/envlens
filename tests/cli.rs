@@ -162,6 +162,27 @@ fn bare_tui_and_report_stubs_exit_4() {
 }
 
 #[test]
+fn bare_tui_validates_profile_source_and_root_before_stub() {
+    cmd()
+        .args(["--profile", "missing", "tests/fixtures/empty"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("unknown profile"));
+
+    cmd()
+        .args(["--source", "not-a-source", "tests/fixtures/empty"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("unknown source"));
+
+    cmd()
+        .arg("/definitely/not/envlens")
+        .assert()
+        .code(3)
+        .stderr(predicate::str::contains("root is unreadable"));
+}
+
+#[test]
 fn panic_hook_exits_4() {
     let output = cmd()
         .env("ENVLENS_TEST_PANIC", "1")
