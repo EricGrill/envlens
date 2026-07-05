@@ -483,7 +483,8 @@ fn config_warnings_go_to_stderr_and_keep_json_stdout_parseable() {
     let tempdir = tempfile::tempdir().expect("tempdir");
     let unknown_key = tempdir.path().join("unknown.yml");
     let malformed = tempdir.path().join("malformed.yml");
-    fs::write(&unknown_key, "mystery: true\n").expect("unknown config");
+    let raw_secret_key = "envlensFakeHistoricalSecret";
+    fs::write(&unknown_key, format!("{raw_secret_key}: true\n")).expect("unknown config");
     fs::write(&malformed, "required: [DATABASE_URL\n").expect("malformed config");
 
     for config in [unknown_key, malformed] {
@@ -498,9 +499,18 @@ fn config_warnings_go_to_stderr_and_keep_json_stdout_parseable() {
             .get_output()
             .clone();
         let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
             !stdout.contains("warning:"),
             "warning leaked into stdout: {stdout}"
+        );
+        assert!(
+            !stdout.contains(raw_secret_key),
+            "stdout leaked raw config secret: {stdout}"
+        );
+        assert!(
+            !stderr.contains(raw_secret_key),
+            "stderr leaked raw config secret: {stderr}"
         );
         let json: Value = serde_json::from_slice(&output.stdout).expect("valid json");
         assert_eq!(json["version"], 1);
