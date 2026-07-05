@@ -1,0 +1,8 @@
+{
+  "scripts": {
+    "dev": "NODE_ENV=development PORT=3000 next dev",
+    "test": "cross-env NODE_ENV=test jest",
+    "win": "set NODE_ENV=production && node app",
+    "lint": "eslint ."
+  }
+}

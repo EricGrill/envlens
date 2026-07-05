@@ -80,6 +80,82 @@ pub fn occurrences_from_process(env: BTreeMap<String, String>) -> Vec<VariableOc
         .collect()
 }
 
+/// Map compose service entries into occurrences for a service subsource such
+/// as `docker-compose.yml[api]`. `None` values are inherited bare keys.
+pub fn occurrences_from_compose(
+    source_id: &str,
+    entries: Vec<compose::ComposeEntry>,
+) -> Vec<VariableOccurrence> {
+    entries
+        .into_iter()
+        .map(|entry| {
+            let is_empty = entry.value.as_deref() == Some("");
+            let is_inherited = entry.value.is_none();
+            VariableOccurrence {
+                key: entry.key,
+                raw_value: entry.value.clone(),
+                parsed_value: entry.value,
+                source_id: source_id.to_string(),
+                line: entry.line,
+                is_empty,
+                is_inherited,
+                no_expand: false,
+                secret: SecretClass::None,
+            }
+        })
+        .collect()
+}
+
+/// Map package-script assignments into occurrences for a script subsource
+/// such as `package.json[dev]`.
+pub fn occurrences_from_scripts(
+    source_id: &str,
+    entries: Vec<(String, String, Option<u32>)>,
+) -> Vec<VariableOccurrence> {
+    entries
+        .into_iter()
+        .map(|(key, value, line)| {
+            let is_empty = value.is_empty();
+            VariableOccurrence {
+                key,
+                raw_value: Some(value.clone()),
+                parsed_value: Some(value),
+                source_id: source_id.to_string(),
+                line,
+                is_empty,
+                is_inherited: false,
+                no_expand: false,
+                secret: SecretClass::None,
+            }
+        })
+        .collect()
+}
+
+/// Map CI env/variables entries into occurrences. CI sources are
+/// informational in v0.1; the resolver excludes them from effective values.
+pub fn occurrences_from_ci(
+    source_id: &str,
+    entries: Vec<(String, String, Option<u32>)>,
+) -> Vec<VariableOccurrence> {
+    entries
+        .into_iter()
+        .map(|(key, value, line)| {
+            let is_empty = value.is_empty();
+            VariableOccurrence {
+                key,
+                raw_value: Some(value.clone()),
+                parsed_value: Some(value),
+                source_id: source_id.to_string(),
+                line,
+                is_empty,
+                is_inherited: false,
+                no_expand: false,
+                secret: SecretClass::None,
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

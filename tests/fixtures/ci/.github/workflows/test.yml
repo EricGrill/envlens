@@ -1,0 +1,7 @@
+env:
+  NODE_ENV: production
+jobs:
+  build:
+    env:
+      API_KEY: ${{ secrets.API_KEY }}
+    steps: []

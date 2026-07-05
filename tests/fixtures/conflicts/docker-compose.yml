@@ -1,0 +1,9 @@
+services:
+  api:
+    environment:
+      PORT: "5001"
+      WORKER_PORT: "7000"
+  worker:
+    environment:
+      PORT: "5002"
+      WORKER_PORT: "7001"

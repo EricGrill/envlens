@@ -1,0 +1,6 @@
+variables:
+  NODE_ENV: test
+deploy:
+  variables:
+    DEPLOY_ENV: production
+  script: echo deploy
