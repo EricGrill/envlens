@@ -14,6 +14,22 @@ use std::collections::BTreeMap;
 use crate::core::model::{SecretClass, VariableOccurrence};
 use process::PROCESS_SOURCE_ID;
 
+/// Render a scalar YAML value as text, the way it would read in a `.env`
+/// file: strings pass through unchanged, booleans/numbers use their
+/// canonical decimal text (no `5001.0`-style float artifacts for integers).
+/// A YAML null and any non-scalar (nested map/sequence) contribute nothing —
+/// callers that need to distinguish "explicit null" from "not present"
+/// (e.g. compose's "inherit from host environment" semantics) do so by
+/// checking the source mapping directly, not via this function's `None`.
+pub(crate) fn stringify_scalar(value: &serde_yaml::Value) -> Option<String> {
+    match value {
+        serde_yaml::Value::Bool(b) => Some(b.to_string()),
+        serde_yaml::Value::Number(n) => Some(n.to_string()),
+        serde_yaml::Value::String(s) => Some(s.clone()),
+        _ => None,
+    }
+}
+
 /// Map dotenv entries from a single source into occurrences. Purely
 /// mechanical field-for-field copying — secret classification is applied by
 /// a later pass, so `secret` is always [`SecretClass::None`] here.

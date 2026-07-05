@@ -30,6 +30,7 @@
 use serde_yaml::Value;
 
 use crate::core::model::ParseError;
+use crate::core::parsers::stringify_scalar;
 
 /// A single service block under `services:` in a compose file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -300,22 +301,6 @@ fn collect_environment(environment: &Value) -> Vec<(String, Option<String>)> {
     }
 
     Vec::new()
-}
-
-/// Render a scalar YAML value the way it would read in a `.env` file:
-/// strings pass through unchanged, booleans/numbers use their canonical
-/// decimal text (no `5001.0`-style float artifacts for integers). A YAML
-/// null (`KEY:` with nothing after the colon) is treated the same as a bare
-/// list-form key: `None`, meaning "inherit from the host environment".
-/// Non-scalar values (nested maps/sequences) are dropped as unsupported.
-fn stringify_scalar(value: &Value) -> Option<String> {
-    match value {
-        Value::Null => None,
-        Value::Bool(b) => Some(b.to_string()),
-        Value::Number(n) => Some(n.to_string()),
-        Value::String(s) => Some(s.clone()),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

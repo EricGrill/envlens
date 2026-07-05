@@ -23,6 +23,7 @@ use std::path::Path;
 use serde_yaml::{Mapping, Value};
 
 use crate::core::model::ParseError;
+use crate::core::parsers::stringify_scalar;
 
 /// Which CI system a config file's shape should be interpreted as.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,9 +172,16 @@ fn parse_gitlab(content: &str) -> (CiEntries, Vec<ParseError>) {
 
     // A "job" is any top-level mapping key (other than `variables` itself)
     // whose value has a `variables` child mapping — GitLab CI has no
-    // separate `jobs:` wrapper the way GitHub Actions does.
+    // separate `jobs:` wrapper the way GitHub Actions does. Dot-prefixed
+    // keys (`.template:`) are GitLab's convention for hidden jobs/templates:
+    // they're never run directly and their `variables:` only takes effect
+    // where another job extends/anchors them, so they're skipped here.
     for (key, value) in top_level {
-        if key.as_str() == Some("variables") {
+        let key_str = key.as_str();
+        if key_str == Some("variables") {
+            continue;
+        }
+        if key_str.is_some_and(|k| k.starts_with('.')) {
             continue;
         }
         let job_variables = value
@@ -202,18 +210,6 @@ fn mapping_entries(content: &str, mapping: &Mapping) -> CiEntries {
             Some((key, value, line))
         })
         .collect()
-}
-
-/// Render a scalar YAML value as text: strings pass through unchanged,
-/// booleans/numbers use their canonical decimal text. A YAML null or a
-/// non-scalar (nested map/sequence) contributes nothing.
-fn stringify_scalar(value: &Value) -> Option<String> {
-    match value {
-        Value::Bool(b) => Some(b.to_string()),
-        Value::Number(n) => Some(n.to_string()),
-        Value::String(s) => Some(s.clone()),
-        _ => None,
-    }
 }
 
 /// Best-effort 1-indexed line number for `key`: the first line in `content`
@@ -273,6 +269,15 @@ mod tests {
                 triple("API_KEY", "secret123"),
             ]
         );
+    }
+
+    #[test]
+    fn gitlab_hidden_job_template_skipped() {
+        let content = ".template:\n  variables:\n    TEMPLATE_VAR: unused\ndeploy:\n  variables:\n    DEPLOY_VAR: value\n";
+        let (entries, errors) = parse(content, CiFlavor::GitlabCi);
+
+        assert!(errors.is_empty());
+        assert_eq!(without_lines(&entries), vec![triple("DEPLOY_VAR", "value")]);
     }
 
     #[test]

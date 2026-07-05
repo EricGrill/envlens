@@ -265,25 +265,32 @@ mod tests {
 
     #[test]
     fn scripts_in_document_order() {
-        let content = r#"{"scripts":{"build":"NODE_ENV=production webpack","dev":"NODE_ENV=development next dev"}}"#;
+        // Keys are deliberately NOT alphabetical ("zebra" before "apple"):
+        // if the `preserve_order` feature on `serde_json` were ever dropped,
+        // this test would fail because the map would iterate alphabetically
+        // instead of in document order. That's the point of the test.
+        let content = r#"{"scripts":{"zebra":"NODE_ENV=z zcmd","apple":"NODE_ENV=a acmd"}}"#;
         let (scripts, errors) = parse(content);
 
         assert!(errors.is_empty());
         assert_eq!(scripts.len(), 2);
-        assert_eq!(scripts[0].script, "build");
-        assert_eq!(scripts[1].script, "dev");
+        assert_eq!(scripts[0].script, "zebra");
+        assert_eq!(scripts[1].script, "apple");
     }
 
     #[test]
     fn line_numbers_located_by_raw_scan() {
-        let content = "{\n  \"scripts\": {\n    \"build\": \"NODE_ENV=production webpack\",\n    \"dev\": \"NODE_ENV=development next dev\"\n  }\n}\n";
+        // Same non-alphabetical ordering as `scripts_in_document_order`, so
+        // this test also guards `preserve_order` rather than passing by
+        // coincidence.
+        let content = "{\n  \"scripts\": {\n    \"zebra\": \"NODE_ENV=z zcmd\",\n    \"apple\": \"NODE_ENV=a acmd\"\n  }\n}\n";
         let (scripts, errors) = parse(content);
 
         assert!(errors.is_empty());
         assert_eq!(scripts.len(), 2);
-        assert_eq!(scripts[0].script, "build");
+        assert_eq!(scripts[0].script, "zebra");
         assert_eq!(scripts[0].entries[0].2, Some(3));
-        assert_eq!(scripts[1].script, "dev");
+        assert_eq!(scripts[1].script, "apple");
         assert_eq!(scripts[1].entries[0].2, Some(4));
     }
 
@@ -304,5 +311,83 @@ mod tests {
 
         assert!(scripts.is_empty());
         assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn only_assignments_no_command() {
+        let content = r#"{"scripts":{"env":"NODE_ENV=production"}}"#;
+        let (scripts, errors) = parse(content);
+
+        assert!(errors.is_empty());
+        assert_eq!(scripts.len(), 1);
+        let pairs: Vec<(String, String)> = scripts[0]
+            .entries
+            .iter()
+            .map(|(k, v, _)| (k.clone(), v.clone()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![("NODE_ENV".to_string(), "production".to_string())]
+        );
+    }
+
+    #[test]
+    fn empty_value_assignment() {
+        let content = r#"{"scripts":{"x":"FOO= node app"}}"#;
+        let (scripts, errors) = parse(content);
+
+        assert!(errors.is_empty());
+        assert_eq!(scripts.len(), 1);
+        let pairs: Vec<(String, String)> = scripts[0]
+            .entries
+            .iter()
+            .map(|(k, v, _)| (k.clone(), v.clone()))
+            .collect();
+        assert_eq!(pairs, vec![("FOO".to_string(), String::new())]);
+    }
+
+    #[test]
+    fn cross_env_without_assignment() {
+        let content = r#"{"scripts":{"x":"cross-env jest"}}"#;
+        let (scripts, errors) = parse(content);
+
+        assert!(errors.is_empty());
+        assert!(
+            scripts.is_empty(),
+            "cross-env with no leading assignment must omit the script, got {scripts:?}"
+        );
+    }
+
+    #[test]
+    fn set_without_assignment() {
+        let content = r#"{"scripts":{"x":"set && node"}}"#;
+        let (scripts, errors) = parse(content);
+
+        assert!(errors.is_empty());
+        assert!(
+            scripts.is_empty(),
+            "set with no assignment token must omit the script, got {scripts:?}"
+        );
+    }
+
+    /// Documents a known v0.1 limitation: the tokenizer is a whitespace
+    /// splitter, not a shell parser, so it has no concept of quoting. A
+    /// quoted value containing a space (`FOO="a b" cmd`) is truncated at the
+    /// first whitespace, leaving the leading quote character in the value
+    /// (`"a`). This test locks that behavior in place so that changing it
+    /// later is a conscious decision, not an accidental regression.
+    #[test]
+    fn quoted_value_truncated_documented() {
+        let content = r#"{"scripts":{"x":"FOO=\"a b\" cmd"}}"#;
+        let (scripts, errors) = parse(content);
+
+        assert!(errors.is_empty());
+        assert_eq!(scripts.len(), 1);
+        let pairs: Vec<(String, String)> = scripts[0]
+            .entries
+            .iter()
+            .map(|(k, v, _)| (k.clone(), v.clone()))
+            .collect();
+        assert_eq!(pairs, vec![("FOO".to_string(), "\"a".to_string())]);
     }
 }
