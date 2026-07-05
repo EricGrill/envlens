@@ -183,6 +183,40 @@ fn bare_tui_validates_profile_source_and_root_before_stub() {
 }
 
 #[test]
+fn unknown_profile_source_and_panic_do_not_leak_secret_like_input() {
+    let raw = "envlensFakeHistoricalSecret";
+
+    for args in [
+        vec!["check", "--profile", raw, "tests/fixtures/empty"],
+        vec!["check", "--source", raw, "tests/fixtures/empty"],
+    ] {
+        let output = cmd()
+            .args(args)
+            .assert()
+            .code(2)
+            .get_output()
+            .stderr
+            .clone();
+        let stderr = String::from_utf8_lossy(&output);
+        assert!(!stderr.contains(raw), "stderr leaked raw secret: {stderr}");
+    }
+
+    let output = cmd()
+        .env("ENVLENS_TEST_PANIC", raw)
+        .assert()
+        .code(4)
+        .get_output()
+        .stderr
+        .clone();
+    let stderr = String::from_utf8_lossy(&output);
+    assert!(stderr.contains("internal error:"));
+    assert!(
+        !stderr.contains(raw),
+        "panic stderr leaked raw secret: {stderr}"
+    );
+}
+
+#[test]
 fn panic_hook_exits_4() {
     let output = cmd()
         .env("ENVLENS_TEST_PANIC", "1")

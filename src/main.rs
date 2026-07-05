@@ -13,8 +13,8 @@ use std::sync::OnceLock;
 fn main() -> ExitCode {
     install_panic_hook();
     #[cfg(debug_assertions)]
-    if std::env::var_os("ENVLENS_TEST_PANIC").is_some() {
-        panic!("forced envlens test panic {}", "x".repeat(1024));
+    if let Some(message) = std::env::var_os("ENVLENS_TEST_PANIC") {
+        panic!("forced envlens test panic {}", message.to_string_lossy());
     }
     let cli = Cli::parse();
     match run(cli) {
@@ -35,7 +35,7 @@ fn install_panic_hook() {
             crossterm::terminal::LeaveAlternateScreen,
             crossterm::cursor::Show
         );
-        let message = panic_info.to_string();
+        let message = sanitize_text(&panic_info.to_string());
         let truncated: String = message.chars().take(512).collect();
         eprintln!("internal error: {truncated}");
         std::process::exit(4);
@@ -101,8 +101,12 @@ fn analyze_for_cli(root: &std::path::Path, cli: &Cli) -> Result<Analysis, (u8, S
         AnalyzeError::RootUnreadable(path) => {
             (3, format!("root is unreadable: {}", path.display()))
         }
-        AnalyzeError::UnknownProfile(name) => (2, format!("unknown profile '{name}'")),
-        AnalyzeError::UnknownSource(name) => (2, format!("unknown source '{name}'")),
+        AnalyzeError::UnknownProfile(name) => {
+            (2, format!("unknown profile '{}'", sanitize_text(&name)))
+        }
+        AnalyzeError::UnknownSource(name) => {
+            (2, format!("unknown source '{}'", sanitize_text(&name)))
+        }
     })
 }
 
