@@ -14,7 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: taiki-e/create-gh-release-action@v1.11.0
+      # taiki-e/create-gh-release-action@v1.11.0
+      - uses: taiki-e/create-gh-release-action@eba8ea96c86cca8a37f1b56e94b4d13301fba651
         with:
           changelog: CHANGELOG.md
 
@@ -43,7 +44,8 @@ jobs:
             build_tool: cross
     steps:
       - uses: actions/checkout@v4
-      - uses: taiki-e/upload-rust-binary-action@v1.30.2
+      # taiki-e/upload-rust-binary-action@v1.30.2
+      - uses: taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6
         with:
           bin: envlens
           target: ${{ matrix.target }}
