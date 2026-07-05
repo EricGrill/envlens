@@ -116,6 +116,8 @@ pub struct Diagnostic {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct VariableSummary {
     pub key: String,
+    /// `(effective value, winning source id)` — in that order. Both halves are
+    /// `String`-typed, so construction sites must not swap them.
     pub effective: Option<(String, SourceId)>,
     /// Precedence ascending.
     pub occurrences: Vec<VariableOccurrence>,
