@@ -121,6 +121,13 @@ pub fn resolve(
                     .unwrap_or(usize::MAX);
                 let left_line = left.line.unwrap_or(u32::MAX);
                 let right_line = right.line.unwrap_or(u32::MAX);
+                if line_orders_document_position(left, right, &source_by_id) {
+                    return (left_line, left_order, *left_input).cmp(&(
+                        right_line,
+                        right_order,
+                        *right_input,
+                    ));
+                }
                 (left_order, left_line, *left_input).cmp(&(right_order, right_line, *right_input))
             });
 
@@ -387,6 +394,29 @@ fn is_value_bearing(kind: SourceKind) -> bool {
         kind,
         SourceKind::Dotenv | SourceKind::Compose | SourceKind::PackageScript | SourceKind::Process
     )
+}
+
+fn line_orders_document_position(
+    left: &VariableOccurrence,
+    right: &VariableOccurrence,
+    source_by_id: &BTreeMap<&str, &EnvSource>,
+) -> bool {
+    if left.source_id == right.source_id {
+        return true;
+    }
+    let Some(left_source) = source_by_id.get(left.source_id.as_str()) else {
+        return false;
+    };
+    let Some(right_source) = source_by_id.get(right.source_id.as_str()) else {
+        return false;
+    };
+    left_source.kind == right_source.kind
+        && matches!(
+            left_source.kind,
+            SourceKind::Compose | SourceKind::PackageScript
+        )
+        && left_source.path.is_some()
+        && left_source.path == right_source.path
 }
 
 fn process_values(
@@ -890,6 +920,36 @@ mod tests {
         let occurrences = vec![
             occ("PORT", "api", "docker-compose.yml[api]", 4),
             occ("PORT", "worker", "docker-compose.yml[worker]", 9),
+        ];
+
+        let vars = rank_and_resolve(sources, occurrences);
+
+        assert_eq!(
+            effective(&vars, "PORT"),
+            Some(&(
+                "worker".to_string(),
+                "docker-compose.yml[worker]".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn subsource_document_order_last_wins_even_when_sources_are_reversed() {
+        let sources = vec![
+            source(
+                "docker-compose.yml[worker]",
+                SourceKind::Compose,
+                Some("docker-compose.yml"),
+            ),
+            source(
+                "docker-compose.yml[api]",
+                SourceKind::Compose,
+                Some("docker-compose.yml"),
+            ),
+        ];
+        let occurrences = vec![
+            occ("PORT", "worker", "docker-compose.yml[worker]", 9),
+            occ("PORT", "api", "docker-compose.yml[api]", 4),
         ];
 
         let vars = rank_and_resolve(sources, occurrences);
