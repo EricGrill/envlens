@@ -42,7 +42,9 @@ pub struct ComposeEntry {
 /// parse at all) yields zero services and exactly one [`ParseError`] with
 /// `line: None`. A well-formed document with no `services:` key, or services
 /// with no `environment:` key, is not an error either — those just produce
-/// empty results.
+/// empty results. A `services:` key that is present but whose value isn't a
+/// mapping (e.g. a scalar or sequence) is a spec violation and yields zero
+/// services plus exactly one [`ParseError`] with `line: None`.
 pub fn parse(content: &str) -> (Vec<ComposeService>, Vec<ParseError>) {
     let document: Value = match serde_yaml::from_str(content) {
         Ok(document) => document,
@@ -57,8 +59,21 @@ pub fn parse(content: &str) -> (Vec<ComposeService>, Vec<ParseError>) {
         }
     };
 
-    let Some(services_map) = document.get("services").and_then(Value::as_mapping) else {
-        return (Vec::new(), Vec::new());
+    let services_map = match document.get("services") {
+        None => return (Vec::new(), Vec::new()),
+        Some(value) => match value.as_mapping() {
+            Some(mapping) => mapping,
+            None => {
+                return (
+                    Vec::new(),
+                    vec![ParseError {
+                        line: None,
+                        message: "services: must be a mapping of service name to definition"
+                            .to_string(),
+                    }],
+                );
+            }
+        },
     };
 
     let lines: Vec<&str> = content.lines().collect();
@@ -279,6 +294,25 @@ mod tests {
     }
 
     #[test]
+    fn map_form_null_value_is_inherited() {
+        let content =
+            "services:\n  api:\n    environment:\n      NODE_ENV:\n      PORT: \"5001\"\n";
+        let (services, errors) = parse(content);
+
+        assert!(errors.is_empty());
+        assert_eq!(
+            services,
+            vec![ComposeService {
+                name: "api".to_string(),
+                entries: vec![
+                    entry("NODE_ENV", None, Some(4)),
+                    entry("PORT", Some("5001"), Some(5)),
+                ],
+            }]
+        );
+    }
+
+    #[test]
     fn list_form() {
         let content = "services:\n  api:\n    environment:\n      - NODE_ENV=development\n      - PORT=5001\n      - DATABASE_URL\n";
         let (services, errors) = parse(content);
@@ -299,13 +333,23 @@ mod tests {
 
     #[test]
     fn services_in_document_order() {
-        let content = "services:\n  web:\n    environment:\n      NODE_ENV: production\n  api:\n    environment:\n      NODE_ENV: development\n";
+        let content = "services:\n  web:\n    environment:\n      NODE_ENV: production\n  api:\n    environment:\n      PORT: \"5001\"\n";
         let (services, errors) = parse(content);
 
         assert!(errors.is_empty());
-        assert_eq!(services.len(), 2);
-        assert_eq!(services[0].name, "web");
-        assert_eq!(services[1].name, "api");
+        assert_eq!(
+            services,
+            vec![
+                ComposeService {
+                    name: "web".to_string(),
+                    entries: vec![entry("NODE_ENV", Some("production"), Some(4))],
+                },
+                ComposeService {
+                    name: "api".to_string(),
+                    entries: vec![entry("PORT", Some("5001"), Some(7))],
+                },
+            ]
+        );
     }
 
     #[test]
@@ -373,6 +417,25 @@ mod tests {
         assert!(services.is_empty());
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].line, None);
+    }
+
+    #[test]
+    fn non_mapping_services_is_one_error() {
+        let content = "services: \"x\"\n";
+        let (services, errors) = parse(content);
+
+        assert_eq!(services.len(), 0);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].line, None);
+    }
+
+    #[test]
+    fn no_services_key_no_error() {
+        let content = "version: \"3.9\"\n";
+        let (services, errors) = parse(content);
+
+        assert!(services.is_empty());
+        assert!(errors.is_empty());
     }
 
     #[test]
