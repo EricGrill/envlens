@@ -73,7 +73,8 @@ pub struct VariableOccurrence {
     pub line: Option<u32>,
     pub is_empty: bool,
     pub is_inherited: bool,
-    /// `true` for single-quoted dotenv values (no `${VAR}` expansion).
+    /// `true` when `${VAR}` expansion must never apply: single-quoted
+    /// dotenv values and all process-environment values.
     pub no_expand: bool,
     pub secret: SecretClass,
 }

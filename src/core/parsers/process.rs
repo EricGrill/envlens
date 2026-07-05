@@ -8,6 +8,10 @@
 
 use std::collections::BTreeMap;
 
+/// Source id used for the process-environment source (see
+/// [`crate::core::parsers::occurrences_from_process`]).
+pub const PROCESS_SOURCE_ID: &str = "process";
+
 /// Snapshot the current process environment.
 ///
 /// Keys and values are lossily decoded from `OsString` via
