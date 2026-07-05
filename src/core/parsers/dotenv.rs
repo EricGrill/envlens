@@ -7,6 +7,8 @@
 //! malformed line — each bad line contributes a [`ParseError`] and parsing
 //! continues with the next line, so callers always get partial results.
 
+use std::borrow::Cow;
+
 use crate::core::model::ParseError;
 
 /// A single `KEY=value` assignment parsed out of a dotenv file.
@@ -14,7 +16,10 @@ use crate::core::model::ParseError;
 pub struct DotenvEntry {
     pub key: String,
     /// Original text of the value, unprocessed (quotes included; spans
-    /// embedded newlines verbatim for multi-line double-quoted values).
+    /// embedded newlines verbatim for multi-line double-quoted values). Note:
+    /// CRLF line endings inside multi-line double-quoted values are
+    /// normalized to `\n` in `raw_value`, since line splitting happens
+    /// before quote scanning.
     pub raw_value: String,
     /// Post-quote/escape-processing value, pre-`${VAR}`-expansion.
     pub parsed_value: String,
@@ -40,7 +45,11 @@ const SENTINEL: char = '\u{E000}';
 /// and parsing continues with the rest of the file.
 pub fn parse(content: &str) -> (Vec<DotenvEntry>, Vec<ParseError>) {
     let content = content.strip_prefix('\u{FEFF}').unwrap_or(content);
-    let cleaned: String = content.chars().filter(|&c| c != SENTINEL).collect();
+    let cleaned: Cow<'_, str> = if content.contains(SENTINEL) {
+        Cow::Owned(content.chars().filter(|&c| c != SENTINEL).collect())
+    } else {
+        Cow::Borrowed(content)
+    };
 
     let physical_lines: Vec<&str> = cleaned
         .split('\n')
@@ -416,6 +425,35 @@ mod tests {
         let (entries, errors) = parse(content);
         assert_eq!(entries, vec![entry("K", "\"l1\nl2\"", "l1\nl2", 1, false)]);
         assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn multiline_dq_resumes_at_correct_line() {
+        // A REAL newline inside the quotes, followed by a real newline and
+        // a second assignment — regression check that the cursor resumes
+        // parsing on the physical line right after the closing quote, with
+        // correct 1-indexed line numbering.
+        let content = "K=\"l1\nl2\"\nNEXT=v";
+        let (entries, errors) = parse(content);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[1].key, "NEXT");
+        assert_eq!(entries[1].line, 3);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn multiline_dq_trailing_junk_anchor() {
+        // Trailing junk after a closing quote that itself terminates a
+        // multi-line double-quoted value: the entry is still kept, and the
+        // trailing-content error anchors to the opening line (1), not the
+        // line the closing quote was found on (2).
+        let content = "K=\"l1\nl2\"junk";
+        let (entries, errors) = parse(content);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].parsed_value, "l1\nl2");
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].line, Some(1));
+        assert!(errors[0].message.contains("junk"));
     }
 
     #[test]
