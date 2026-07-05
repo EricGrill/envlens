@@ -35,6 +35,7 @@ pub struct RunOptions {
     pub tracked: Option<BTreeSet<PathBuf>>,
     pub theme: Theme,
     pub has_editor: bool,
+    pub source_date_epoch: Option<u64>,
 }
 
 pub fn run<F>(options: RunOptions, mut refresh: F) -> Result<()>
@@ -64,7 +65,12 @@ where
         if app.should_quit {
             break;
         }
-        handle_side_effects(&mut app, &mut terminal, &mut refresh)?;
+        handle_side_effects(
+            &mut app,
+            &mut terminal,
+            &mut refresh,
+            options.source_date_epoch,
+        )?;
     }
 
     Ok(())
@@ -82,7 +88,12 @@ fn read_event() -> Result<Event> {
     }
 }
 
-fn handle_side_effects<F>(app: &mut App, terminal: &mut TuiTerminal, refresh: &mut F) -> Result<()>
+fn handle_side_effects<F>(
+    app: &mut App,
+    terminal: &mut TuiTerminal,
+    refresh: &mut F,
+    source_date_epoch: Option<u64>,
+) -> Result<()>
 where
     F: FnMut() -> Result<(Analysis, Option<BTreeSet<PathBuf>>)>,
 {
@@ -100,14 +111,14 @@ where
     }
 
     if let Some((path, line)) = app.want_editor.take() {
-        app.status = match open_editor(terminal, path, line) {
-            Ok(()) => Some("returned from editor".to_string()),
-            Err(err) => Some(format!("editor failed: {err}")),
+        app.status = match open_editor(terminal, path, line)? {
+            EditorOutcome::Returned => Some("returned from editor".to_string()),
+            EditorOutcome::Failed(message) => Some(format!("editor failed: {message}")),
         };
     }
 
     if let Some(path) = app.want_export.take() {
-        app.status = match export_report(app, path) {
+        app.status = match export_report(app, path, source_date_epoch) {
             Ok(path) => Some(format!("exported to {}", path.display())),
             Err(err) => Some(format!("export failed: {err}")),
         };
@@ -116,28 +127,41 @@ where
     Ok(())
 }
 
-fn open_editor(terminal: &mut TuiTerminal, path: PathBuf, line: u32) -> Result<()> {
+enum EditorOutcome {
+    Returned,
+    Failed(String),
+}
+
+fn open_editor(terminal: &mut TuiTerminal, path: PathBuf, line: u32) -> Result<EditorOutcome> {
     let editor = std::env::var_os("EDITOR").context("$EDITOR is not set")?;
     suspend_terminal(terminal)?;
     let status = Command::new(editor)
         .arg(format!("+{line}"))
         .arg(&path)
         .status();
-    let resume_result = resume_terminal(terminal);
+    resume_terminal(terminal)?;
 
-    match (status, resume_result) {
-        (Ok(status), Ok(())) if status.success() => Ok(()),
-        (Ok(status), Ok(())) => Err(anyhow::anyhow!("editor exited with {status}")),
-        (Err(err), Ok(())) => Err(err).context("could not launch editor"),
-        (_, Err(err)) => Err(err),
+    match status {
+        Ok(status) if status.success() => Ok(EditorOutcome::Returned),
+        Ok(status) => Ok(EditorOutcome::Failed(format!(
+            "editor exited with {status}"
+        ))),
+        Err(err) => Ok(EditorOutcome::Failed(format!(
+            "could not launch editor: {err}"
+        ))),
     }
 }
 
 fn suspend_terminal(terminal: &mut TuiTerminal) -> Result<()> {
     disable_raw_mode().context("could not disable raw mode for editor")?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, cursor::Show)
-        .context("could not leave alternate screen for editor")?;
-    terminal.show_cursor().context("could not show cursor")?;
+    if let Err(err) = execute!(terminal.backend_mut(), LeaveAlternateScreen, cursor::Show) {
+        let _ = resume_terminal(terminal);
+        return Err(err).context("could not leave alternate screen for editor");
+    }
+    if let Err(err) = terminal.show_cursor() {
+        let _ = resume_terminal(terminal);
+        return Err(err).context("could not show cursor");
+    }
     Ok(())
 }
 
@@ -148,8 +172,12 @@ fn resume_terminal(terminal: &mut TuiTerminal) -> Result<()> {
     Ok(())
 }
 
-fn export_report(app: &App, path: PathBuf) -> Result<PathBuf> {
-    let rendered = report::markdown::render(&app.analysis, report::generated_at(None), false);
+fn export_report(app: &App, path: PathBuf, source_date_epoch: Option<u64>) -> Result<PathBuf> {
+    let rendered = report::markdown::render(
+        &app.analysis,
+        report::generated_at(source_date_epoch),
+        false,
+    );
     fs::write(&path, rendered).with_context(|| format!("could not write {}", path.display()))?;
     Ok(path)
 }
@@ -173,5 +201,54 @@ impl Drop for TerminalGuard {
         let _ = disable_raw_mode();
         let mut stdout = io::stdout();
         let _ = execute!(stdout, LeaveAlternateScreen, cursor::Show);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use crate::config::Config;
+    use crate::core::{External, analyze};
+
+    use super::*;
+
+    #[test]
+    fn export_report_honors_source_date_epoch() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("basic");
+        let analysis = match analyze(
+            &root,
+            &Config::default(),
+            None,
+            None,
+            External {
+                process_env: BTreeMap::new(),
+                tracked_files: None,
+            },
+        ) {
+            Ok(analysis) => analysis,
+            Err(err) => panic!("fixture analysis failed: {err}"),
+        };
+        let app = App::new(analysis, root, Config::default(), None, None, false);
+        let dir = match tempfile::tempdir() {
+            Ok(dir) => dir,
+            Err(err) => panic!("tempdir failed: {err}"),
+        };
+        let path = dir.path().join("envlens-report.md");
+
+        if let Err(err) = export_report(&app, path.clone(), Some(0)) {
+            panic!("export failed: {err}");
+        }
+        let contents = match fs::read_to_string(&path) {
+            Ok(contents) => contents,
+            Err(err) => panic!("read export failed: {err}"),
+        };
+
+        assert!(contents.contains("Generated: 1970-01-01T00:00:00Z"));
+        assert!(!contents.contains("envlensFakeHistoricalSecret"));
+        assert!(!contents.contains("secret123"));
     }
 }

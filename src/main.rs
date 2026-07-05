@@ -74,6 +74,7 @@ fn run(mut cli: Cli) -> CliResult<u8> {
                     tracked: context.tracked,
                     theme,
                     has_editor,
+                    source_date_epoch: source_date_epoch(),
                 },
                 move || {
                     analyze_with_external(
