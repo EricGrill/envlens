@@ -1,6 +1,7 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::Value;
+use std::fs;
 
 fn cmd() -> Command {
     let mut command = match Command::cargo_bin("envlens") {
@@ -352,18 +353,165 @@ fn check_strict_threshold_fails_on_warnings() {
 }
 
 #[test]
-fn bare_tui_and_report_stubs_exit_4() {
+fn bare_tui_stub_exits_4() {
     cmd()
         .arg("tests/fixtures/empty")
         .assert()
         .code(4)
         .stderr(predicate::str::contains("TUI not yet implemented"));
+}
+
+#[test]
+fn report_markdown_golden() {
+    let output = cmd()
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("SOURCE_DATE_EPOCH", "0")
+        .args(["report", "--format", "markdown", "tests/fixtures/basic"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8_lossy(&output);
+    for raw in ["envlensFakeHistoricalSecret", "secret123"] {
+        assert!(!stdout.contains(raw), "markdown leaked {raw}: {stdout}");
+    }
+
+    insta::assert_snapshot!("report_markdown_golden", stdout);
+}
+
+#[test]
+fn report_json_format() {
+    let report_output = cmd()
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("SOURCE_DATE_EPOCH", "0")
+        .args(["report", "--format", "json", "tests/fixtures/basic"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let check_output = cmd()
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("SOURCE_DATE_EPOCH", "0")
+        .args(["check", "--json", "tests/fixtures/basic"])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+
+    assert_eq!(report_output, check_output);
+    let json: Value = serde_json::from_slice(&report_output).expect("valid json");
+    assert_eq!(json["version"], 1);
+    assert_eq!(json["generated_at"], "1970-01-01T00:00:00Z");
+}
+
+#[test]
+fn report_out_writes_file() {
+    let expected = cmd()
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("SOURCE_DATE_EPOCH", "0")
+        .args(["report", "--format", "markdown", "tests/fixtures/basic"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let out = tempdir.path().join("env-report.md");
+
+    let output = cmd()
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("SOURCE_DATE_EPOCH", "0")
+        .args([
+            "report",
+            "--format",
+            "markdown",
+            "--out",
+            out.to_str().unwrap_or(""),
+            "tests/fixtures/basic",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert!(output.is_empty());
+
+    let file = fs::read(&out).expect("report file");
+    assert_eq!(file, expected);
+    let contents = String::from_utf8_lossy(&file);
+    for raw in ["envlensFakeHistoricalSecret", "secret123"] {
+        assert!(!contents.contains(raw), "file leaked {raw}: {contents}");
+    }
+}
+
+#[test]
+fn report_no_values_markdown() {
+    let output = cmd()
+        .env("SOURCE_DATE_EPOCH", "0")
+        .args([
+            "report",
+            "--format",
+            "markdown",
+            "--no-values",
+            "tests/fixtures/basic",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8_lossy(&output);
+
+    for raw in ["3000", "5001", "secret123", "sk_live_"] {
+        assert!(!stdout.contains(raw), "markdown leaked {raw}: {stdout}");
+    }
+    assert!(!stdout.contains("Value"));
+    insta::assert_snapshot!("report_no_values_markdown", stdout);
+}
+
+#[test]
+fn report_no_values_json() {
+    let output = cmd()
+        .env("SOURCE_DATE_EPOCH", "0")
+        .args([
+            "report",
+            "--format",
+            "json",
+            "--no-values",
+            "tests/fixtures/basic",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8_lossy(&output);
+    for raw in ["5001", "secret123", "sk_live_"] {
+        assert!(!stdout.contains(raw), "json leaked {raw}: {stdout}");
+    }
+    let json: Value = serde_json::from_slice(&output).expect("valid json");
+    assert_no_value_keys(&json);
+}
+
+#[test]
+fn report_always_exits_0() {
+    cmd()
+        .args(["check", "tests/fixtures/basic"])
+        .assert()
+        .code(1);
 
     cmd()
-        .args(["report", "--format", "json", "tests/fixtures/empty"])
+        .args(["report", "--format", "markdown", "tests/fixtures/basic"])
         .assert()
-        .code(4)
-        .stderr(predicate::str::contains("report not yet implemented"));
+        .success();
+
+    cmd()
+        .args(["report", "--format", "json", "tests/fixtures/basic"])
+        .assert()
+        .success();
 }
 
 #[test]

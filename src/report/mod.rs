@@ -7,6 +7,7 @@ use crate::core::model::{Analysis, Diagnostic, DiagnosticCode, SecretClass, Seve
 use crate::core::secrets::{MaskedValue, classify_value};
 
 pub mod json;
+pub mod markdown;
 
 pub fn generated_at(source_date_epoch: Option<u64>) -> String {
     let seconds = match source_date_epoch {

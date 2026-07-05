@@ -1,11 +1,12 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use envlens::cli::{Cli, Command};
+use envlens::cli::{Cli, Command, ReportFormat};
 use envlens::config::Config;
 use envlens::core::model::{Analysis, Severity};
 use envlens::core::{AnalyzeError, External};
 use envlens::report::{generated_at, render_check_human, sanitize_text};
+use std::fs;
 
 fn main() -> ExitCode {
     install_panic_hook();
@@ -73,14 +74,48 @@ fn run(mut cli: Cli) -> Result<u8, (u8, String)> {
             }
             Ok(check_exit_code(&analysis, strict))
         }
-        Some(Command::Report { path, .. }) => {
+        Some(Command::Report {
+            path,
+            format,
+            out,
+            no_values,
+        }) => {
             let root = path
                 .or_else(|| cli.path.clone())
                 .unwrap_or_else(|| ".".into());
-            let _analysis = analyze_for_cli(&root, &cli)?;
-            eprintln!("report not yet implemented");
-            Ok(4)
+            let analysis = analyze_for_cli(&root, &cli)?;
+            let generated_at = generated_at(source_date_epoch());
+            let rendered = render_report(&analysis, format, generated_at, no_values)?;
+            if let Some(out) = out {
+                fs::write(&out, rendered).map_err(|err| {
+                    (
+                        4,
+                        format!("could not write report {}: {err}", out.display()),
+                    )
+                })?;
+            } else {
+                print!("{rendered}");
+            }
+            Ok(0)
         }
+    }
+}
+
+fn render_report(
+    analysis: &Analysis,
+    format: ReportFormat,
+    generated_at: String,
+    no_values: bool,
+) -> Result<String, (u8, String)> {
+    match format {
+        ReportFormat::Markdown => Ok(envlens::report::markdown::render(
+            analysis,
+            generated_at,
+            no_values,
+        )),
+        ReportFormat::Json => envlens::report::json::render(analysis, generated_at, no_values)
+            .map(|json| format!("{json}\n"))
+            .map_err(|err| (4, format!("could not serialize analysis: {err}"))),
     }
 }
 
