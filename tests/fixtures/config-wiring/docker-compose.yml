@@ -1,0 +1,7 @@
+services:
+  web:
+    environment:
+      PORT: "9000"
+  worker:
+    environment:
+      PORT: "7000"

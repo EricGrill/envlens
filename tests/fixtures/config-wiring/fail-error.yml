@@ -1,0 +1,3 @@
+required:
+  - EXTRA_VAR
+fail_on: error

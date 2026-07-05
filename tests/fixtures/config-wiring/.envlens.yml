@@ -1,0 +1,13 @@
+required:
+  - EXTRA_VAR
+secret_patterns:
+  - "SUPABASE_.*"
+fail_on: warning
+profiles:
+  web:
+    include:
+      - .env
+      - docker-compose.yml[web]
+precedence:
+  - .env
+  - docker-compose.yml[web]

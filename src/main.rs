@@ -4,7 +4,7 @@ use std::process::ExitCode;
 
 use clap::Parser;
 use envlens::cli::{Cli, Command, ReportFormat};
-use envlens::config::Config;
+use envlens::config::{Config, FailOn};
 use envlens::core::model::{Analysis, Severity};
 use envlens::core::{AnalyzeError, External};
 use envlens::report::{generated_at, render_check_human, sanitize_text};
@@ -103,7 +103,8 @@ fn run(mut cli: Cli) -> CliResult<u8> {
             let root = path
                 .or_else(|| cli.path.clone())
                 .unwrap_or_else(|| ".".into());
-            let analysis = analyze_for_cli(&root, &cli)?;
+            let context = analyze_context_for_cli(&root, &cli)?;
+            let analysis = context.analysis;
             if json {
                 let generated_at = generated_at(source_date_epoch());
                 println!(
@@ -117,7 +118,7 @@ fn run(mut cli: Cli) -> CliResult<u8> {
                     render_check_human(&analysis, should_color_output(&cli), no_values)
                 );
             }
-            Ok(check_exit_code(&analysis, strict))
+            Ok(check_exit_code(&analysis, strict, context.config.fail_on))
         }
         Some(Command::Report {
             path,
@@ -180,15 +181,25 @@ fn analyze_for_cli(root: &Path, cli: &Cli) -> CliResult<Analysis> {
 }
 
 fn analyze_context_for_cli(root: &Path, cli: &Cli) -> CliResult<AnalysisContext> {
-    let config = Config {
-        ignore: cli.ignore.clone(),
-        ..Config::default()
+    let mut loaded = if let Some(path) = &cli.config {
+        envlens::config::load_file(path)
+    } else {
+        envlens::config::discover(
+            root,
+            std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+            std::env::var_os("HOME").map(PathBuf::from),
+        )
     };
+    for warning in loaded.warnings {
+        eprintln!("warning: {}", sanitize_text(&warning));
+    }
+    loaded.config.ignore.extend(cli.ignore.clone());
+
     let (analysis, tracked) =
-        analyze_with_external(root, &config, cli.profile.as_deref(), &cli.source)?;
+        analyze_with_external(root, &loaded.config, cli.profile.as_deref(), &cli.source)?;
     Ok(AnalysisContext {
         analysis,
-        config,
+        config: loaded.config,
         tracked,
     })
 }
@@ -221,11 +232,10 @@ fn analyze_with_external(
         })
 }
 
-fn check_exit_code(analysis: &Analysis, strict: bool) -> u8 {
-    let threshold = if strict {
-        Severity::Warning
-    } else {
-        Severity::Error
+fn check_exit_code(analysis: &Analysis, strict: bool, fail_on: FailOn) -> u8 {
+    let threshold = match (strict, fail_on) {
+        (true, _) | (false, FailOn::Warning) => Severity::Warning,
+        (false, FailOn::Error) => Severity::Error,
     };
     if analysis
         .diagnostics

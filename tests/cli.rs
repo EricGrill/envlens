@@ -353,6 +353,130 @@ fn check_strict_threshold_fails_on_warnings() {
 }
 
 #[test]
+fn discovered_config_fail_on_warning_and_custom_profile_are_wired() {
+    let output = cmd()
+        .env("SOURCE_DATE_EPOCH", "0")
+        .args([
+            "--profile",
+            "web",
+            "check",
+            "--json",
+            "tests/fixtures/config-wiring",
+        ])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("valid json");
+
+    assert_eq!(json["profile"], "web");
+    let port = json["variables"]
+        .as_array()
+        .expect("variables array")
+        .iter()
+        .find(|var| var["key"] == "PORT")
+        .expect("PORT variable");
+    assert_eq!(port["effective"]["source_id"], "docker-compose.yml[web]");
+    assert_eq!(port["effective"]["value"], "9000");
+
+    let supabase = json["variables"]
+        .as_array()
+        .expect("variables array")
+        .iter()
+        .find(|var| var["key"] == "SUPABASE_PUBLIC")
+        .expect("SUPABASE_PUBLIC variable");
+    assert_eq!(supabase["is_secret_like"], true);
+}
+
+#[test]
+fn strict_overrides_config_fail_on_error_upward() {
+    cmd()
+        .args([
+            "--config",
+            "tests/fixtures/config-wiring/fail-error.yml",
+            "check",
+            "tests/fixtures/config-wiring",
+        ])
+        .assert()
+        .success();
+
+    cmd()
+        .args([
+            "--config",
+            "tests/fixtures/config-wiring/fail-error.yml",
+            "check",
+            "--strict",
+            "tests/fixtures/config-wiring",
+        ])
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn profile_source_intersection_is_enforced_from_config() {
+    cmd()
+        .args([
+            "--profile",
+            "web",
+            "--source",
+            ".env",
+            "check",
+            "tests/fixtures/config-wiring",
+        ])
+        .assert()
+        .code(1);
+
+    cmd()
+        .args([
+            "--profile",
+            "web",
+            "--source",
+            "docker-compose.yml[worker]",
+            "check",
+            "tests/fixtures/config-wiring",
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("unknown source"));
+
+    cmd()
+        .args([
+            "--profile",
+            "web",
+            "--source",
+            "missing.env",
+            "check",
+            "tests/fixtures/config-wiring",
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("unknown source"));
+}
+
+#[test]
+fn config_ignore_reaches_scanner() {
+    let output = cmd()
+        .env("SOURCE_DATE_EPOCH", "0")
+        .args(["check", "--json", "tests/fixtures/config-ignore"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("valid json");
+    let sources: Vec<_> = json["sources"]
+        .as_array()
+        .expect("sources array")
+        .iter()
+        .map(|source| source["id"].as_str().unwrap_or(""))
+        .collect();
+
+    assert!(sources.contains(&".env"));
+    assert!(!sources.contains(&"tmp/.env"));
+}
+
+#[test]
 fn bare_tui_without_tty_exits_4() {
     cmd()
         .arg("tests/fixtures/empty")
