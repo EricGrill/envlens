@@ -10,7 +10,7 @@ EnvLens is a Rust TUI and CLI for inspecting, comparing, and debugging environme
 
 ## Features
 
-- Discovers `.env*` files, example templates, Docker Compose files, package scripts, flat CI env blocks, and the current process environment.
+- Discovers `.env*` files, example templates, Docker Compose files, package scripts, flat GitHub Actions/GitLab env blocks, recognized CI config files, and the current process environment.
 - Shows a three-pane TUI with sources, variables, and selected-variable details.
 - Computes effective values with deterministic precedence and optional profiles/source filters.
 - Flags duplicate keys, conflicting values, missing required variables, empty required values, invalid dotenv lines, undefined and circular references, unresolved inherited compose variables, shadowed values, and tracked-file secrets.
@@ -23,7 +23,7 @@ EnvLens is a Rust TUI and CLI for inspecting, comparing, and debugging environme
 From a GitHub release tarball:
 
 ```sh
-curl -L https://github.com/EricGrill/envlens/releases/download/v0.1.0/envlens-v0.1.0-x86_64-unknown-linux-gnu.tar.gz | tar xz
+curl -L https://github.com/EricGrill/envlens/releases/download/v0.1.0/envlens-x86_64-unknown-linux-gnu.tar.gz | tar xz
 sudo mv envlens /usr/local/bin/
 ```
 
