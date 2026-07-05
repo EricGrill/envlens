@@ -193,6 +193,7 @@ pub fn analyze(
     )?;
     let mut variables = resolve::resolve(&sources, occurrences);
     let reference_diagnostics = resolve::expand_references(&mut variables);
+    refresh_variable_secret_flags(&mut variables);
 
     let mut analysis = Analysis {
         root: root.to_path_buf(),
@@ -250,6 +251,19 @@ fn classify_occurrences(occurrences: &mut [VariableOccurrence], config: &Config)
             (false, true) => SecretClass::ValueLike,
             (false, false) => SecretClass::None,
         };
+    }
+}
+
+fn refresh_variable_secret_flags(variables: &mut [model::VariableSummary]) {
+    for var in variables {
+        var.is_secret_like = var
+            .occurrences
+            .iter()
+            .any(|occurrence| occurrence.secret.is_secret())
+            || var
+                .effective
+                .as_ref()
+                .is_some_and(|(value, _)| secrets::classify_value(value));
     }
 }
 
@@ -425,5 +439,28 @@ mod tests {
                         || diagnostic.source_id.as_deref() == Some("turbo.json")
                 )
         );
+    }
+
+    #[test]
+    fn expanded_secret_effective_value_is_masked_in_diagnostics() {
+        let root = fixture("expanded-secret");
+        let analysis = analyze(&root, &Config::default(), None, None, empty_external()).unwrap();
+        let public_alias = variable(&analysis, "PUBLIC_ALIAS");
+
+        assert!(public_alias.is_secret_like);
+        assert_eq!(
+            public_alias.effective.as_ref(),
+            Some(&(
+                "envlensFakeHistoricalSecret".to_string(),
+                ".env.local".to_string()
+            ))
+        );
+        let conflict = public_alias
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == DiagnosticCode::ConflictingValues)
+            .expect("PUBLIC_ALIAS should conflict across sources");
+        assert!(conflict.message.contains('•'));
+        assert!(!conflict.message.contains("envlensFakeHistoricalSecret"));
     }
 }
