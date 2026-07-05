@@ -3,9 +3,9 @@ source: tests/tui.rs
 expression: rendered
 ---
 ┌Sources───────────────────┐┌Variables (4)─────────────────────────────────────────────────────────┐
-│> [x] env .env            ││> # DATABASE_URL       ********                 .env                  │
-│  [x] env .env.local      ││  ! JWT_SECRET         sk_********              .env.local            │
-│  [x] proc process        ││  + KEYBOARD_LAYOUT    us                       .env                  │
+│> [x]  env  4 .env        ││> # DATABASE_URL       ********                 .env                  │
+│  [x]  env  2 .env.local  ││  ! JWT_SECRET         sk_********              .env.local            │
+│  [x]  proc  0 process    ││  + KEYBOARD_LAYOUT    us                       .env                  │
 │                          ││  # PUBLIC_KEY         ********                 .env                  │
 │                          ││                                                                      │
 │                          ││                                                                      │

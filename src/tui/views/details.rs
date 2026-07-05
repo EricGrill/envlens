@@ -10,18 +10,24 @@ use crate::tui::views::variables::value_text;
 use crate::tui::views::{block, clip};
 
 pub fn draw(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
+    let inner_height = area.height.saturating_sub(2) as usize;
+    let inner_width = area.width.saturating_sub(2) as usize;
     let lines = if let Some(source) = app.analysis.sources.get(app.selected_source)
         && source.kind == SourceKind::Manifest
     {
         vec![
-            Line::from(format!("{} selected", source.id)),
-            Line::from("discovered; contributes no environment variables in v0.1"),
+            clipped_line(format!("{} selected", source.id), inner_width),
+            clipped_line(
+                "discovered; contributes no environment variables in v0.1",
+                inner_width,
+            ),
         ]
     } else if let Some(variable) = visible_variables(app).get(app.selected_var).copied() {
-        variable_lines(variable, app, theme)
+        variable_lines(variable, app, theme, inner_height, inner_width)
     } else {
-        vec![Line::from(
+        vec![clipped_line(
             "No variables match the current source/filter/search.",
+            inner_width,
         )]
     };
 
@@ -33,39 +39,64 @@ pub fn draw(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
     );
 }
 
-fn variable_lines(variable: &VariableSummary, app: &App, theme: &Theme) -> Vec<Line<'static>> {
+fn variable_lines(
+    variable: &VariableSummary,
+    app: &App,
+    theme: &Theme,
+    inner_height: usize,
+    inner_width: usize,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    lines.push(Line::from(format!("{} {}", variable.key, status(variable))));
+    lines.push(clipped_line(
+        format!("{} {}", variable.key, status(variable)),
+        inner_width,
+    ));
     match &variable.effective {
-        Some((_, source_id)) => lines.push(Line::from(format!(
-            "effective: {} from {}",
-            clip(value_text(variable, app, theme), 60),
-            source_id
-        ))),
-        None => lines.push(Line::from("effective: <missing>")),
+        Some((_, source_id)) => lines.push(clipped_line(
+            format!(
+                "effective: {} from {}",
+                clip(value_text(variable, app, theme), 60),
+                source_id
+            ),
+            inner_width,
+        )),
+        None => lines.push(clipped_line("effective: <missing>", inner_width)),
     }
     if app.expanded.contains(&variable.key) {
-        lines.push(Line::from("expanded: showing every occurrence"));
+        lines.push(clipped_line(
+            "expanded: showing every occurrence",
+            inner_width,
+        ));
     }
     lines.push(Line::from(""));
-    lines.push(Line::from("occurrences:"));
-    for occurrence in &variable.occurrences {
-        lines.push(Line::from(format!(
-            "  {} {}",
-            location(occurrence),
-            occurrence_value(variable, occurrence, app, theme)
-        )));
+    lines.push(clipped_line("occurrences:", inner_width));
+
+    let diagnostics = diagnostic_lines(variable, inner_width);
+    let available_occurrences = inner_height.saturating_sub(lines.len() + diagnostics.len());
+    let truncated = variable.occurrences.len() > available_occurrences;
+    let visible_occurrences = if truncated {
+        available_occurrences.saturating_sub(1)
+    } else {
+        available_occurrences
+    };
+    for occurrence in variable.occurrences.iter().take(visible_occurrences) {
+        lines.push(clipped_line(
+            format!(
+                "  {} {}",
+                location(occurrence),
+                occurrence_value(variable, occurrence, app, theme)
+            ),
+            inner_width,
+        ));
     }
-    if !variable.diagnostics.is_empty() {
-        lines.push(Line::from(""));
-        lines.push(Line::from("diagnostics:"));
-        for diagnostic in &variable.diagnostics {
-            lines.push(Line::from(format!(
-                "  {:?} {:?}: {}",
-                diagnostic.severity, diagnostic.code, diagnostic.message
-            )));
-        }
+    if truncated && available_occurrences > 0 {
+        let hidden = variable.occurrences.len() - visible_occurrences;
+        lines.push(clipped_line(
+            format!("  ... +{hidden} more occurrences"),
+            inner_width,
+        ));
     }
+    lines.extend(diagnostics);
     lines
 }
 
@@ -108,6 +139,9 @@ fn occurrence_value(
     if occurrence.no_expand {
         annotations.push("literal");
     }
+    if occurrence_is_unresolved(variable, occurrence) {
+        annotations.push("unresolved");
+    }
     let suffix = if annotations.is_empty() {
         String::new()
     } else {
@@ -128,4 +162,44 @@ fn occurrence_value(
         })
         .unwrap_or_else(|| "<inherited>".to_string());
     format!("={}{}", clip(value, 80), suffix)
+}
+
+fn occurrence_is_unresolved(variable: &VariableSummary, occurrence: &VariableOccurrence) -> bool {
+    variable.diagnostics.iter().any(|diagnostic| {
+        matches!(
+            diagnostic.code,
+            DiagnosticCode::UndefinedReference | DiagnosticCode::InheritedUnresolved
+        ) && diagnostic.key.as_ref() == Some(&variable.key)
+            && diagnostic
+                .source_id
+                .as_ref()
+                .is_none_or(|source_id| source_id == &occurrence.source_id)
+            && diagnostic
+                .line
+                .is_none_or(|line| Some(line) == occurrence.line)
+    })
+}
+
+fn diagnostic_lines(variable: &VariableSummary, inner_width: usize) -> Vec<Line<'static>> {
+    if variable.diagnostics.is_empty() {
+        return Vec::new();
+    }
+
+    let mut lines = Vec::new();
+    lines.push(Line::from(""));
+    lines.push(clipped_line("diagnostics:", inner_width));
+    for diagnostic in &variable.diagnostics {
+        lines.push(clipped_line(
+            format!(
+                "  {:?} {:?}: {}",
+                diagnostic.severity, diagnostic.code, diagnostic.message
+            ),
+            inner_width,
+        ));
+    }
+    lines
+}
+
+fn clipped_line(value: impl AsRef<str>, width: usize) -> Line<'static> {
+    Line::from(clip(value, width))
 }

@@ -2,11 +2,11 @@
 source: tests/tui.rs
 expression: rendered
 ---
-╭Sources───────────────────╮╭Variables (1)─────────────────────────────────────────────────────────╮
-│> [x]  req  5 .env.examp… ││> ⚠ PORT               5001                     .env.local            │
-│  [x]  env  4 .env        ││                                                                      │
-│  [x]  env  2 .env.local  ││                                                                      │
-│  [x]  proc  0 process    ││                                                                      │
+╭Sources───────────────────╮╭Variables (2)─────────────────────────────────────────────────────────╮
+│> [x]! env  2 .env        ││> ✓ ALSO_VALID         yes                      .env                  │
+│  [x]  proc  0 process    ││  ✓ VALID              ok                       .env                  │
+│                          ││                                                                      │
+│                          ││                                                                      │
 │                          ││                                                                      │
 │                          ││                                                                      │
 │                          ││                                                                      │
@@ -20,15 +20,15 @@ expression: rendered
 │                          ││                                                                      │
 ╰──────────────────────────╯╰──────────────────────────────────────────────────────────────────────╯
 ╭Details───────────────────────────────────────────────────────────────────────────────────────────╮
-│PORT (conflict)                                                                                   │
-│effective: 5001 from .env.local                                                                   │
+│ALSO_VALID                                                                                        │
+│effective: yes from .env                                                                          │
 │                                                                                                  │
 │occurrences:                                                                                      │
-│.env.example:2 = (empty)                                                                          │
-│... +2 more occurrences                                                                           │
+│.env:5 =yes                                                                                       │
 │                                                                                                  │
-│diagnostics:                                                                                      │
-│Warning ConflictingValues: PORT differs across sources: .env:2 (3000), .env.local:1 (5001). Eff…  │
-│Info ShadowedValue: PORT from .env:2 (3000) is shadowed by .env.local:1 (5001).                   │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-profile=default filter=Warnings sort=Key pane=Sources
+profile=default filter=All sort=Key pane=Sources

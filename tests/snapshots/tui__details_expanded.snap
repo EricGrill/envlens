@@ -3,10 +3,10 @@ source: tests/tui.rs
 expression: rendered
 ---
 ╭Sources───────────────────╮╭Variables (4)─────────────────────────────────────────────────────────╮
-│  [x] req .env.example    ││  ⚠ API_URL            ${HOST}:5001             .env                  │
-│> [x] env .env            ││  🔒  DATABASE_URL       ••••••••                 .env                 │
-│  [x] env .env.local      ││  ✓ NODE_ENV           development              .env                  │
-│  [x] proc process        ││> ⚠ PORT               5001                     .env.local            │
+│  [x]  req  5 .env.examp… ││  ⚠ API_URL            ${HOST}:5001             .env                  │
+│> [x]  env  4 .env        ││  🔒  DATABASE_URL       ••••••••                 .env                 │
+│  [x]  env  2 .env.local  ││  ✓ NODE_ENV           development              .env                  │
+│  [x]  proc  0 process    ││> ⚠ PORT               5001                     .env.local            │
 │                          ││                                                                      │
 │                          ││                                                                      │
 │                          ││                                                                      │
@@ -25,10 +25,10 @@ expression: rendered
 │expanded: showing every occurrence                                                                │
 │                                                                                                  │
 │occurrences:                                                                                      │
-│.env.example:2 = (empty)                                                                          │
-│.env:2 =3000                                                                                      │
-│.env.local:1 =5001                                                                                │
+│... +3 more occurrences                                                                           │
 │                                                                                                  │
 │diagnostics:                                                                                      │
+│Warning ConflictingValues: PORT differs across sources: .env:2 (3000), .env.local:1 (5001). Eff…  │
+│Info ShadowedValue: PORT from .env:2 (3000) is shadowed by .env.local:1 (5001).                   │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 profile=default filter=All sort=Key pane=Variables

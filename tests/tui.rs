@@ -147,6 +147,26 @@ fn filter_secrets() {
 }
 
 #[test]
+fn source_parse_error_badge() {
+    let app = app_for("invalid");
+    let rendered = render(&app, &Theme::new(false, false), 100, 30);
+    assert!(rendered.contains("[x]!"));
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn details_unresolved_annotation() {
+    let mut app = app_for("basic");
+    app.pane = Pane::Variables;
+    select_source(&mut app, ".env");
+    select_visible_key(&mut app, "API_URL");
+    let rendered = render(&app, &Theme::new(false, false), 100, 30);
+    assert!(rendered.contains("(unresolved)"));
+    assert!(rendered.contains("UndefinedReference"));
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
 fn details_secret_masked() {
     let mut app = app_for("secrets");
     app.pane = Pane::Variables;

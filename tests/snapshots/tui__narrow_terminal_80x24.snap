@@ -3,10 +3,10 @@ source: tests/tui.rs
 expression: rendered
 ---
 ╭Sources───────────────────╮╭Variables (5)─────────────────────────────────────╮
-│> [x] req .env.example    ││> 🔒  DATABASE_URL       ••••••••                 .│
-│  [x] env .env            ││  ✗ JWT_SECRET         -                        - │
-│  [x] env .env.local      ││  ✓ NODE_ENV           development              .e│
-│  [x] proc process        ││  ⚠ PORT               5001                     .e│
+│> [x]  req  5 .env.examp… ││> 🔒  DATABASE_URL       ••••••••                 .│
+│  [x]  env  4 .env        ││  ✗ JWT_SECRET         -                        - │
+│  [x]  env  2 .env.local  ││  ✓ NODE_ENV           development              .e│
+│  [x]  proc  0 process    ││  ⚠ PORT               5001                     .e│
 │                          ││  ✗ REDIS_URL          -                        - │
 │                          ││                                                  │
 │                          ││                                                  │
