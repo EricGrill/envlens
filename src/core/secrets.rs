@@ -15,6 +15,26 @@
 //! expressible with plain string operations, so no fallible regex
 //! construction is needed. `extra_patterns` are pre-compiled by the caller
 //! (config loading, a later task) and used only via `Regex::is_match`.
+//!
+//! **Known blind spots of the entropy heuristic.** [`is_high_entropy_token`]
+//! (threshold: >3.5 bits/char over a whitespace-free string) is a
+//! *secondary* net that only runs after key-name classification
+//! ([`classify_key`]) and the known-prefix/JWT/PEM/userinfo shape checks in
+//! [`classify_value`] have already had a chance to flag the value. It can
+//! **miss** secrets with low character variety even when they're long and
+//! random: a purely numeric or moderate-length hex string can never clear
+//! the threshold, since a single-character Shannon entropy over decimal
+//! digits alone maxes out at `log2(10) ≈ 3.32` bits/char (hex maxes out at
+//! `log2(16) = 4.0`, but realistic hex tokens are frequently misclassified
+//! low if the caller trims them or the value is short). It can also
+//! **over-flag** long whitespace-free URLs or filesystem paths as
+//! high-entropy — that direction is safe (a false positive just means an
+//! extra mask) so it's left as-is. A naive "long all-hex string is a
+//! secret" rule was deliberately **not** added to plug the hex gap: git
+//! commit SHAs (40 hex characters) and UUIDs (32 hex characters) are common
+//! *non-secret* values that such a rule would false-positive on constantly.
+//! The primary defense against these gaps is key-name classification
+//! ([`classify_key`]), not the entropy fallback.
 
 use std::collections::HashMap;
 
@@ -170,19 +190,23 @@ pub fn shannon_entropy_bits_per_char(s: &str) -> f64 {
         total += 1;
     }
     let total = total as f64;
-    -counts
+    (-counts
         .values()
         .map(|&count| {
             let p = count as f64 / total;
             p * p.log2()
         })
-        .sum::<f64>()
+        .sum::<f64>())
+    .max(0.0)
 }
 
-/// Mask `value` for display (spec §9): length-hiding fixed-width mask below
-/// 8 characters, otherwise an optional 3-char plaintext prefix (only when
-/// `value` matches a [`KNOWN_VALUE_PREFIXES`] entry) + up to 10 bullet/star
-/// characters + the last 2 characters.
+/// Mask `value` for display (spec §9): a fixed-width mask that never reveals
+/// the secret's length, regardless of which length bucket it falls in.
+/// Below 8 characters this is 8 bullet/star characters; at 8 or more
+/// characters it's an optional 3-char plaintext prefix (only when `value`
+/// matches a [`KNOWN_VALUE_PREFIXES`] entry) + a fixed 10 bullet/star
+/// characters + the last 2 characters. Both branches use a fixed bullet
+/// count so the mask's width never encodes `value`'s actual length.
 pub fn mask(value: &str, ascii: bool) -> String {
     let bullet = if ascii { '*' } else { '•' };
     let chars: Vec<char> = value.chars().collect();
@@ -199,8 +223,7 @@ pub fn mask(value: &str, ascii: bool) -> String {
     };
     let prefix: String = chars.iter().take(prefix_len).collect();
     let last_two: String = chars[len - 2..].iter().collect();
-    let bullet_count = len.saturating_sub(prefix_len + 2).min(10);
-    let bullets = bullet.to_string().repeat(bullet_count);
+    let bullets = bullet.to_string().repeat(10);
 
     format!("{prefix}{bullets}{last_two}")
 }
@@ -350,6 +373,11 @@ mod tests {
     }
 
     #[test]
+    fn mask_hides_length_for_short_maskable() {
+        assert_eq!(mask("abcdefgh", false), format!("{}gh", "•".repeat(10)));
+    }
+
+    #[test]
     fn mask_ascii_mode_uses_asterisks() {
         assert_eq!(
             mask("envlensFakeHistoricalSecret", true),
@@ -384,5 +412,12 @@ mod tests {
     #[test]
     fn entropy_of_high_variety_string_exceeds_threshold() {
         assert!(shannon_entropy_bits_per_char("abcd1234EFGH5678ijkl9012") > 3.5);
+    }
+
+    #[test]
+    fn entropy_of_single_char_is_zero_not_negative_zero() {
+        let entropy = shannon_entropy_bits_per_char("a");
+        assert_eq!(entropy, 0.0);
+        assert!(!entropy.is_sign_negative());
     }
 }
