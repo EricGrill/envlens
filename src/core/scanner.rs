@@ -419,11 +419,12 @@ mod tests {
         let dir = TempDir::new().expect("tempdir");
         let root = dir.path();
 
-        // On case-insensitive filesystems directories may have mixed case.
-        touch(root, ".GitHub/workflows/ci.yml");
-        touch(root, ".github/workflows/other.yml");
-        touch(root, ".CircleCI/config.yml");
-        touch(root, ".circleci/config.yml");
+        // Keep same-name case variants under distinct parents so this test is
+        // stable on both case-sensitive and case-insensitive filesystems.
+        touch(root, "mixed-github/.GitHub/workflows/ci.yml");
+        touch(root, "lower-github/.github/workflows/other.yml");
+        touch(root, "mixed-circle/.CircleCI/config.yml");
+        touch(root, "lower-circle/.circleci/config.yml");
 
         let result = scan_default(root);
         let kinds: Vec<_> = result.iter().map(|(_, k)| *k).collect();
