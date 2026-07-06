@@ -595,7 +595,7 @@ mod tests {
                     "API_KEY",
                     vec![occ(
                         "API_KEY",
-                        "envlensFakeHistoricalSecret",
+                        "envlensFakeSecretValue12345678",
                         ".env",
                         5,
                         SecretClass::Both,

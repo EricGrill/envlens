@@ -296,14 +296,14 @@ expression: snapshot
       "key": "STRIPE_API_KEY",
       "effective": {
         "source_id": ".env.local",
-        "value": "sk_••••••••••78"
+        "value": "••••••••••78"
       },
       "occurrences": [
         {
           "source_id": ".env.local",
           "line": 2,
-          "raw": "sk_••••••••••78",
-          "value": "sk_••••••••••78",
+          "raw": "••••••••••78",
+          "value": "••••••••••78",
           "is_empty": false,
           "is_inherited": false,
           "no_expand": false,

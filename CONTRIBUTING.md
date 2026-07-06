@@ -44,7 +44,8 @@ Only accept snapshot changes after confirming the rendered behavior is intended 
 
 - Put integration fixtures under `tests/fixtures/<name>/`.
 - Keep fixtures small and readable.
-- Use fake secrets only. Prefer obvious fake values such as `sk_live_...` test strings that cannot be real credentials.
+- Use fake secrets only. Prefer repo-owned fake values such as `envlensFakeSecretValue12345678`.
+- Do not commit provider-shaped fake credentials, even if invalid. Strings that look like live Stripe, GitHub, AWS, Slack, or Google tokens will trigger secret scanners and make public-history audits noisy.
 - Add the smallest fixture that proves the behavior. Reuse existing fixtures when possible.
 - Do not rely on the caller's process environment in fixture assertions unless the test explicitly sets it.
 - Keep expected source IDs project-relative, for example `.env`, `apps/web/.env`, `docker-compose.yml[api]`, or `package.json[dev]`.

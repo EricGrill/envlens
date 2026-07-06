@@ -1194,7 +1194,7 @@ Value is masked.
 
 | Source | Line | Value |
 |---|---:|---|
-| `.env.local` | 5 | `sk_live_••••••••8F` |
+| `.env.local` | 5 | `••••••••••8F` |
 ```
 
 ---

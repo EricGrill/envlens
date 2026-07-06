@@ -172,7 +172,7 @@ fn no_values_truly_value_free() {
         .stdout
         .clone();
     let stdout = String::from_utf8_lossy(&output);
-    for raw in ["5001", "secret123", "sk_live_"] {
+    for raw in ["5001", "secret123", "envlensFake"] {
         assert!(!stdout.contains(raw), "output leaked {raw}: {stdout}");
     }
 
@@ -191,7 +191,7 @@ fn no_values_human_output_is_value_free() {
         .clone();
     let stdout = String::from_utf8_lossy(&output);
 
-    for raw in ["3000", "5001", "secret123", "sk_live_"] {
+    for raw in ["3000", "5001", "secret123", "envlensFake"] {
         assert!(!stdout.contains(raw), "human output leaked {raw}: {stdout}");
     }
     assert!(stdout.contains("PORT differs across sources."));
@@ -209,7 +209,7 @@ fn json_occurrences_inherit_variable_secret_masking() {
         .clone();
     let stdout = String::from_utf8_lossy(&output);
 
-    for raw in ["plain", "${REAL_SECRET}", "envlensFakeHistoricalSecret"] {
+    for raw in ["plain", "${REAL_SECRET}", "envlensFakeSecretValue12345678"] {
         assert!(!stdout.contains(raw), "json leaked {raw}: {stdout}");
     }
 
@@ -223,7 +223,7 @@ fn json_occurrences_inherit_variable_secret_masking() {
     assert_eq!(public_alias["is_secret_like"], true);
     assert_eq!(
         public_alias["effective"]["value"].as_str().unwrap_or(""),
-        "sk_••••••••••78"
+        "••••••••••78"
     );
 }
 
@@ -248,7 +248,7 @@ fn planted_secret_never_unmasked() {
         .clone();
     let human_stdout = String::from_utf8_lossy(&human_output);
 
-    for raw in ["envlensFakeHistoricalSecret", "secret123"] {
+    for raw in ["envlensFakeSecretValue12345678", "secret123"] {
         assert!(
             !json_stdout.contains(raw),
             "json leaked raw secret {raw}: {json_stdout}"
@@ -295,7 +295,7 @@ fn check_human_output_readable() {
 
 #[test]
 fn malformed_secret_never_leaks_json_or_human() {
-    let raw = "envlensFakeHistoricalSecret";
+    let raw = "envlensFakeMalformedSecret123456";
 
     for args in [
         vec!["check", "--json", "tests/fixtures/malformed-secret"],
@@ -483,7 +483,7 @@ fn config_warnings_go_to_stderr_and_keep_json_stdout_parseable() {
     let tempdir = tempfile::tempdir().expect("tempdir");
     let unknown_key = tempdir.path().join("unknown.yml");
     let malformed = tempdir.path().join("malformed.yml");
-    let raw_secret_key = "envlensFakeHistoricalSecret";
+    let raw_secret_key = "envlensFakeConfigWarning1234567890";
     fs::write(&unknown_key, format!("{raw_secret_key}: true\n")).expect("unknown config");
     fs::write(&malformed, "required: [DATABASE_URL\n").expect("malformed config");
 
@@ -539,7 +539,7 @@ fn report_markdown_golden() {
         .stdout
         .clone();
     let stdout = String::from_utf8_lossy(&output);
-    for raw in ["envlensFakeHistoricalSecret", "secret123"] {
+    for raw in ["envlensFakeSecretValue12345678", "secret123"] {
         assert!(!stdout.contains(raw), "markdown leaked {raw}: {stdout}");
     }
 
@@ -608,7 +608,7 @@ fn report_out_writes_file() {
     let file = fs::read(&out).expect("report file");
     assert_eq!(file, expected);
     let contents = String::from_utf8_lossy(&file);
-    for raw in ["envlensFakeHistoricalSecret", "secret123"] {
+    for raw in ["envlensFakeSecretValue12345678", "secret123"] {
         assert!(!contents.contains(raw), "file leaked {raw}: {contents}");
     }
 }
@@ -631,7 +631,7 @@ fn report_no_values_markdown() {
         .clone();
     let stdout = String::from_utf8_lossy(&output);
 
-    for raw in ["3000", "5001", "secret123", "sk_live_"] {
+    for raw in ["3000", "5001", "secret123", "envlensFake"] {
         assert!(!stdout.contains(raw), "markdown leaked {raw}: {stdout}");
     }
     assert!(!stdout.contains("Value"));
@@ -655,7 +655,7 @@ fn report_no_values_json() {
         .stdout
         .clone();
     let stdout = String::from_utf8_lossy(&output);
-    for raw in ["5001", "secret123", "sk_live_"] {
+    for raw in ["5001", "secret123", "envlensFake"] {
         assert!(!stdout.contains(raw), "json leaked {raw}: {stdout}");
     }
     let json: Value = serde_json::from_slice(&output).expect("valid json");
@@ -703,7 +703,7 @@ fn bare_tui_validates_profile_source_and_root_before_terminal() {
 
 #[test]
 fn unknown_profile_source_and_panic_do_not_leak_secret_like_input() {
-    let raw = "envlensFakeHistoricalSecret";
+    let raw = "envlensFakeCliAccident12345678";
 
     for args in [
         vec!["check", "--profile", raw, "tests/fixtures/empty"],

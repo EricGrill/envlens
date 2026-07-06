@@ -248,7 +248,7 @@ mod tests {
         };
 
         assert!(contents.contains("Generated: 1970-01-01T00:00:00Z"));
-        assert!(!contents.contains("envlensFakeHistoricalSecret"));
+        assert!(!contents.contains("envlensFakeSecretValue12345678"));
         assert!(!contents.contains("secret123"));
     }
 }

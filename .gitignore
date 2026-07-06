@@ -1,3 +1,5 @@
 /target
+.omx/
+envlens-report.*
 *.pending-snap
 *.snap.new

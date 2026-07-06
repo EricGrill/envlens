@@ -513,7 +513,7 @@ mod tests {
         assert_eq!(
             public_alias.effective.as_ref(),
             Some(&(
-                "envlensFakeHistoricalSecret".to_string(),
+                "envlensFakeSecretValue12345678".to_string(),
                 ".env.local".to_string()
             ))
         );
@@ -523,7 +523,7 @@ mod tests {
             .find(|diagnostic| diagnostic.code == DiagnosticCode::ConflictingValues)
             .expect("PUBLIC_ALIAS should conflict across sources");
         assert!(conflict.message.contains('•'));
-        assert!(!conflict.message.contains("envlensFakeHistoricalSecret"));
+        assert!(!conflict.message.contains("envlensFakeSecretValue12345678"));
     }
 
     #[test]

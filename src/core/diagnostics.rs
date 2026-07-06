@@ -694,12 +694,12 @@ mod tests {
             ],
             vec![var(
                 "JWT_SECRET",
-                Some(("envlensFakeHistoricalSecret", ".env.local")),
+                Some(("envlensFakeSecretSecond9999", ".env.local")),
                 vec![
-                    secret_occ("JWT_SECRET", "envlensFakeHistoricalSecret", ".env", Some(2)),
+                    secret_occ("JWT_SECRET", "envlensFakeSecretFirst1234", ".env", Some(2)),
                     secret_occ(
                         "JWT_SECRET",
-                        "envlensFakeHistoricalSecret",
+                        "envlensFakeSecretSecond9999",
                         ".env.local",
                         Some(5),
                     ),
@@ -716,10 +716,9 @@ mod tests {
             .unwrap()
             .message
             .clone();
-        assert!(message.contains("sk_"));
         assert!(message.contains('•'));
-        assert!(!message.contains("firstsecret"));
-        assert!(!message.contains("secondsecret"));
+        assert!(!message.contains("envlensFakeSecretFirst1234"));
+        assert!(!message.contains("envlensFakeSecretSecond9999"));
     }
 
     #[test]
@@ -1010,10 +1009,10 @@ mod tests {
             vec![source(".env", SourceKind::Dotenv, Some(".env"), 10)],
             vec![var(
                 "JWT_SECRET",
-                Some(("envlensFakeHistoricalSecret", ".env")),
+                Some(("envlensFakeSecretValue1234", ".env")),
                 vec![secret_occ(
                     "JWT_SECRET",
-                    "envlensFakeHistoricalSecret",
+                    "envlensFakeSecretValue1234",
                     ".env",
                     Some(1),
                 )],
@@ -1034,10 +1033,10 @@ mod tests {
             vec![source(".env", SourceKind::Dotenv, Some(".env"), 10)],
             vec![var(
                 "JWT_SECRET",
-                Some(("envlensFakeHistoricalSecret", ".env")),
+                Some(("envlensFakeSecretValue1234", ".env")),
                 vec![secret_occ(
                     "JWT_SECRET",
-                    "envlensFakeHistoricalSecret",
+                    "envlensFakeSecretValue1234",
                     ".env",
                     Some(1),
                 )],

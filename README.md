@@ -185,6 +185,7 @@ Use `--no-values` to omit value-bearing fields entirely.
 - Revealing values is TUI-only, transient, and never written by report/export paths.
 - EnvLens has no network dependencies and does not make network calls.
 - EnvLens has no telemetry.
+- See [SECURITY.md](SECURITY.md) for vulnerability reporting and public test-data guidelines.
 
 ## License
 

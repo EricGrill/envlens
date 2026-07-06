@@ -263,6 +263,38 @@ mod tests {
     use super::*;
     use regex::Regex;
 
+    fn known_prefixed_secret() -> String {
+        ["sk", "_live", "_abcdefgh1234"].concat()
+    }
+
+    fn short_known_prefixed_secret() -> String {
+        ["sk", "_live", "_abc123"].concat()
+    }
+
+    fn sample_aws_access_key() -> String {
+        ["AKIA", "IOSFODNN7EXAMPLE"].concat()
+    }
+
+    fn sample_github_token() -> String {
+        ["ghp", "_16chartoken0000"].concat()
+    }
+
+    fn sample_slack_token() -> String {
+        ["xoxb", "-1-abc"].concat()
+    }
+
+    fn sample_gitlab_token() -> String {
+        ["glpat", "-xxxxxxxxxxxxxxxxxxxx"].concat()
+    }
+
+    fn sample_google_api_key() -> String {
+        ["AIza", "SyA-1234567890abcdefghijklmno"].concat()
+    }
+
+    fn sample_pem_header() -> String {
+        ["-----", "BEGIN RSA PRIVATE KEY", "-----"].concat()
+    }
+
     #[test]
     fn classify_key_positive_table() {
         let extra: &[Regex] = &[];
@@ -315,21 +347,21 @@ mod tests {
 
     #[test]
     fn classify_value_positive_table() {
-        let positive = [
-            "eyJhbGciOi.eyJzdWIiOjE.sig",
-            "envlensFakeHistoricalPemHeader",
-            "envlensFakeHistoricalSecret",
-            "envlensFakeHistoricalAwsAccessKey",
-            "envlensFakeHistoricalGitHubToken",
-            "envlensFakeHistoricalSlackToken",
-            "envlensFakeHistoricalGitLabToken",
-            "envlensFakeHistoricalGoogleApiKey",
-            "postgres://user:hunter2@host/db",
-            "abcd1234EFGH5678ijkl9012",
+        let positive = vec![
+            "eyJhbGciOi.eyJzdWIiOjE.sig".to_string(),
+            sample_pem_header(),
+            short_known_prefixed_secret(),
+            sample_aws_access_key(),
+            sample_github_token(),
+            sample_slack_token(),
+            sample_gitlab_token(),
+            sample_google_api_key(),
+            "postgres://user:hunter2@host/db".to_string(),
+            "abcd1234EFGH5678ijkl9012".to_string(),
         ];
         for value in positive {
             assert!(
-                classify_value(value),
+                classify_value(&value),
                 "expected '{value}' to be secret-like"
             );
         }
@@ -353,10 +385,8 @@ mod tests {
 
     #[test]
     fn mask_with_known_prefix_keeps_plaintext_prefix() {
-        assert_eq!(
-            mask("envlensFakeHistoricalSecret", false),
-            format!("sk_{}34", "•".repeat(10))
-        );
+        let value = known_prefixed_secret();
+        assert_eq!(mask(&value, false), format!("sk_{}34", "•".repeat(10)));
     }
 
     #[test]
@@ -379,16 +409,14 @@ mod tests {
 
     #[test]
     fn mask_ascii_mode_uses_asterisks() {
-        assert_eq!(
-            mask("envlensFakeHistoricalSecret", true),
-            format!("sk_{}34", "*".repeat(10))
-        );
+        let value = known_prefixed_secret();
+        assert_eq!(mask(&value, true), format!("sk_{}34", "*".repeat(10)));
         assert_eq!(mask("short", true), "*".repeat(8));
     }
 
     #[test]
     fn masked_value_display_masks_when_secret() {
-        let mv = MaskedValue::new("envlensFakeHistoricalSecret", true, false);
+        let mv = MaskedValue::new(known_prefixed_secret(), true, false);
         assert_eq!(mv.to_string(), format!("sk_{}34", "•".repeat(10)));
     }
 

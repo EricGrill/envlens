@@ -85,10 +85,10 @@ fn select_visible_key(app: &mut App, key: &str) {
 
 fn assert_no_secret_leak(rendered: &str) {
     for raw in [
-        "envlensFakeHistoricalSecret",
-        "envlensFakeHistoricalSecret",
+        "envlensFakeSecretFirst1234",
+        "envlensFakeSecretSecond9999",
         "eyJhbGciOi.eyJzdWIiOjE.sig",
-        "envlensFakeHistoricalSecret",
+        "envlensFakeSecretValue12345678",
         "secret123",
     ] {
         assert!(!rendered.contains(raw), "render leaked {raw}:\n{rendered}");
@@ -185,7 +185,7 @@ fn details_secret_revealed() {
     select_visible_key(&mut app, "JWT_SECRET");
     update(&mut app, key(KeyCode::Char('r')));
     let rendered = render(&app, &Theme::new(false, false), 100, 30);
-    assert!(rendered.contains("envlensFakeHistoricalSecret"));
+    assert!(rendered.contains("envlensFakeSecretFirst1234"));
     insta::assert_snapshot!(rendered);
 }
 
