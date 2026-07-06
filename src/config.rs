@@ -263,8 +263,13 @@ fn project_config_path(root: &Path) -> Option<PathBuf> {
 }
 
 fn user_config_path(xdg: Option<PathBuf>, home: Option<PathBuf>) -> Option<PathBuf> {
-    xdg.map(|path| path.join("envlens").join("config.yml"))
-        .or_else(|| home.map(|path| path.join(".config").join("envlens").join("config.yml")))
+    let base = xdg
+        .map(|path| path.join("envlens"))
+        .or_else(|| home.map(|path| path.join(".config").join("envlens")))?;
+    ["config.yml", "config.yaml"]
+        .into_iter()
+        .map(|name| base.join(name))
+        .find(|path| path.is_file())
 }
 
 #[cfg(test)]
@@ -399,5 +404,45 @@ fail_on: warning
 
         assert_eq!(loaded.config.required, vec!["YML"]);
         assert_eq!(loaded.config.ignore, vec!["cache"]);
+    }
+
+    #[test]
+    fn discovery_user_config_yaml_extension() {
+        let tempdir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let root = tempdir.path().join("project");
+        let xdg = tempdir.path().join("xdg");
+        fs::create_dir_all(xdg.join("envlens")).unwrap_or_else(|err| panic!("mkdir: {err}"));
+        fs::write(
+            xdg.join("envlens/config.yaml"),
+            "required: [USER_YAML]\n",
+        )
+        .unwrap_or_else(|err| panic!("write: {err}"));
+
+        let loaded = discover(&root, Some(xdg), None);
+
+        assert_eq!(loaded.config.required, vec!["USER_YAML"]);
+    }
+
+    #[test]
+    fn discovery_user_config_yml_takes_priority_over_yaml() {
+        let tempdir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let root = tempdir.path().join("project");
+        let xdg = tempdir.path().join("xdg");
+        fs::create_dir_all(xdg.join("envlens")).unwrap_or_else(|err| panic!("mkdir: {err}"));
+        fs::write(
+            xdg.join("envlens/config.yml"),
+            "required: [USER_YML]\n",
+        )
+        .unwrap_or_else(|err| panic!("write: {err}"));
+        fs::write(
+            xdg.join("envlens/config.yaml"),
+            "required: [USER_YAML]\n",
+        )
+        .unwrap_or_else(|err| panic!("write: {err}"));
+
+        let loaded = discover(&root, Some(xdg), None);
+
+        // .yml should win when both exist (first in the list)
+        assert_eq!(loaded.config.required, vec!["USER_YML"]);
     }
 }
