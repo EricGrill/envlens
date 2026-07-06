@@ -161,6 +161,9 @@ fn is_circleci_config(rel_path: &Path) -> bool {
 /// in order (e.g. `expected = [".github", "workflows"]` matches
 /// `.github/workflows/x.yml` and `a/b/.github/workflows/x.yml`, since only
 /// the suffix of the parent chain is checked).
+///
+/// Comparison is case-insensitive so that paths on case-insensitive
+/// filesystems (Windows, macOS default) are handled correctly.
 fn parent_matches(rel_path: &Path, expected: &[&str]) -> bool {
     let Some(parent) = rel_path.parent() else {
         return false;
@@ -173,7 +176,12 @@ fn parent_matches(rel_path: &Path, expected: &[&str]) -> bool {
     components[start..]
         .iter()
         .zip(expected.iter())
-        .all(|(component, name)| **component == *OsStr::new(name))
+        .all(|(component, name)| {
+            component
+                .to_str()
+                .map(|s| s.eq_ignore_ascii_case(name))
+                .unwrap_or(false)
+        })
 }
 
 #[cfg(test)]
@@ -404,5 +412,23 @@ mod tests {
         touch(root, ".envrc");
 
         assert_eq!(scan_default(root), Vec::new());
+    }
+
+    #[test]
+    fn case_insensitive_ci_directory_matching() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+
+        // On case-insensitive filesystems directories may have mixed case.
+        touch(root, ".GitHub/workflows/ci.yml");
+        touch(root, ".github/workflows/other.yml");
+        touch(root, ".CircleCI/config.yml");
+        touch(root, ".circleci/config.yml");
+
+        let result = scan_default(root);
+        let kinds: Vec<_> = result.iter().map(|(_, k)| *k).collect();
+
+        // All four should be classified as CI regardless of case.
+        assert_eq!(kinds, vec![SourceKind::Ci; 4]);
     }
 }
