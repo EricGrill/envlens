@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use envlens::cli::{Cli, Command, ReportFormat};
 use envlens::config::{Config, FailOn};
 use envlens::core::model::{Analysis, Severity};
@@ -144,6 +144,91 @@ fn run(mut cli: Cli) -> CliResult<u8> {
             }
             Ok(0)
         }
+        Some(Command::Diff {
+            left,
+            right,
+            path,
+            left_profile,
+            right_profile,
+            json,
+            all,
+            no_values,
+            exit_code,
+        }) => {
+            let root = path
+                .or_else(|| cli.path.clone())
+                .unwrap_or_else(|| ".".into());
+            let config = load_config_for_cli(&root, &cli);
+
+            let ((left_analysis, left_label), (right_analysis, right_label)) =
+                if left_profile.is_some() || right_profile.is_some() {
+                    let (Some(lp), Some(rp)) = (left_profile, right_profile) else {
+                        return Err((
+                            2,
+                            "diff by profile requires both --left-profile and --right-profile"
+                                .to_string(),
+                        ));
+                    };
+                    let left = analyze_with_external(&root, &config, Some(&lp), &[])?.0;
+                    let right = analyze_with_external(&root, &config, Some(&rp), &[])?.0;
+                    ((left, lp), (right, rp))
+                } else {
+                    let (Some(l), Some(r)) = (left, right) else {
+                        return Err((
+                            2,
+                            "diff requires two source tokens (LEFT RIGHT) or \
+                             --left-profile/--right-profile"
+                                .to_string(),
+                        ));
+                    };
+                    let profile = cli.profile.as_deref();
+                    let left =
+                        analyze_with_external(&root, &config, profile, std::slice::from_ref(&l))?.0;
+                    let right =
+                        analyze_with_external(&root, &config, profile, std::slice::from_ref(&r))?.0;
+                    ((left, l), (right, r))
+                };
+
+            let result =
+                envlens::diff::compute(&left_analysis, &right_analysis, left_label, right_label);
+            if json {
+                println!(
+                    "{}",
+                    envlens::diff::render_json(&result, no_values)
+                        .map_err(|err| (4, format!("could not serialize diff: {err}")))?
+                );
+            } else {
+                print!(
+                    "{}",
+                    envlens::diff::render_human(&result, all, no_values, should_color_output(&cli))
+                );
+            }
+            Ok(if exit_code && result.has_changes() {
+                1
+            } else {
+                0
+            })
+        }
+        Some(Command::Sync { path, dry_run }) => {
+            let root = path
+                .or_else(|| cli.path.clone())
+                .unwrap_or_else(|| ".".into());
+            let config = load_config_for_cli(&root, &cli);
+            let analysis =
+                analyze_with_external(&root, &config, cli.profile.as_deref(), &cli.source)?.0;
+            let plan = envlens::sync::plan(&analysis);
+            if !dry_run {
+                envlens::sync::apply(&root, &plan)
+                    .map_err(|err| (4, format!("could not write example file: {err}")))?;
+            }
+            print!("{}", envlens::sync::render_plan(&plan, dry_run));
+            Ok(0)
+        }
+        Some(Command::Completions { shell }) => {
+            let mut command = Cli::command();
+            clap_complete::generate(shell, &mut command, "envlens", &mut std::io::stdout());
+            Ok(0)
+        }
     }
 }
 
@@ -181,6 +266,20 @@ fn analyze_for_cli(root: &Path, cli: &Cli) -> CliResult<Analysis> {
 }
 
 fn analyze_context_for_cli(root: &Path, cli: &Cli) -> CliResult<AnalysisContext> {
+    let config = load_config_for_cli(root, cli);
+    let (analysis, tracked) =
+        analyze_with_external(root, &config, cli.profile.as_deref(), &cli.source)?;
+    Ok(AnalysisContext {
+        analysis,
+        config,
+        tracked,
+    })
+}
+
+/// Discover and merge configuration for a CLI run, emitting any config
+/// warnings and folding in `--ignore` directories. Shared by every subcommand
+/// so they resolve config identically.
+fn load_config_for_cli(root: &Path, cli: &Cli) -> Config {
     let mut loaded = if let Some(path) = &cli.config {
         envlens::config::load_file(path)
     } else {
@@ -194,14 +293,7 @@ fn analyze_context_for_cli(root: &Path, cli: &Cli) -> CliResult<AnalysisContext>
         eprintln!("warning: {}", sanitize_text(&warning));
     }
     loaded.config.ignore.extend(cli.ignore.clone());
-
-    let (analysis, tracked) =
-        analyze_with_external(root, &loaded.config, cli.profile.as_deref(), &cli.source)?;
-    Ok(AnalysisContext {
-        analysis,
-        config: loaded.config,
-        tracked,
-    })
+    loaded.config
 }
 
 fn analyze_with_external(

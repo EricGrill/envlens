@@ -87,6 +87,8 @@ pub(crate) fn source_kind_name(kind: SourceKind) -> &'static str {
     match kind {
         SourceKind::Dotenv => "dotenv",
         SourceKind::DotenvExample => "dotenv_example",
+        SourceKind::Direnv => "direnv",
+        SourceKind::Dockerfile => "dockerfile",
         SourceKind::Compose => "compose",
         SourceKind::PackageScript => "package_script",
         SourceKind::Manifest => "manifest",

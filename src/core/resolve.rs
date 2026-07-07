@@ -291,6 +291,8 @@ fn default_rank(source: &EnvSource) -> u32 {
     match source.kind {
         SourceKind::Dotenv => dotenv_rank(source),
         SourceKind::DotenvExample | SourceKind::Manifest | SourceKind::Ci => 0,
+        SourceKind::Dockerfile => 80,
+        SourceKind::Direnv => 85,
         SourceKind::Compose => 90,
         SourceKind::PackageScript => 100,
         SourceKind::Process => 110,
@@ -393,7 +395,12 @@ fn source_enabled(sources: &[EnvSource], id: &SourceId) -> bool {
 fn is_value_bearing(kind: SourceKind) -> bool {
     matches!(
         kind,
-        SourceKind::Dotenv | SourceKind::Compose | SourceKind::PackageScript | SourceKind::Process
+        SourceKind::Dotenv
+            | SourceKind::Direnv
+            | SourceKind::Dockerfile
+            | SourceKind::Compose
+            | SourceKind::PackageScript
+            | SourceKind::Process
     )
 }
 

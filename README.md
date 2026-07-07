@@ -10,7 +10,7 @@ EnvLens is a Rust TUI and CLI for inspecting, comparing, and debugging environme
 
 ## Features
 
-- Discovers `.env*` files, example templates, Docker Compose files, package scripts, flat GitHub Actions/GitLab env blocks, recognized CI config files, and the current process environment.
+- Discovers `.env*` files, example templates, `Dockerfile`/`Containerfile` `ENV`/`ARG` instructions, direnv `.envrc` assignments, Docker Compose files, package scripts, flat GitHub Actions/GitLab env blocks, recognized CI config files, and the current process environment.
 - Shows a three-pane TUI with sources, variables, and selected-variable details.
 - Computes effective values with deterministic precedence and optional profiles/source filters.
 - Flags duplicate keys, conflicting values, missing required variables, empty required values, invalid dotenv lines, undefined and circular references, unresolved inherited compose variables, shadowed values, and tracked-file secrets.
@@ -76,13 +76,42 @@ jobs:
       - run: envlens check --strict --no-values
 ```
 
+Compare two profiles or two sources:
+
+```sh
+envlens diff .env .env.production
+envlens diff --left-profile dev --right-profile prod
+envlens diff .env .env.production --json --exit-code
+```
+
+Scaffold missing keys into example files:
+
+```sh
+envlens sync            # add keys present in real sources but missing from .env.example (values stripped)
+envlens sync --dry-run  # show what would change without writing
+```
+
 Common options:
 
 ```sh
 envlens [PATH] [--profile NAME] [--source SOURCE]... [--ignore DIR]... [--config FILE] [--no-color] [--ascii]
 envlens check [PATH] [--json] [--strict] [--no-values]
 envlens report [PATH] --format markdown|json [--out FILE] [--no-values]
+envlens diff [LEFT] [RIGHT] [--left-profile NAME] [--right-profile NAME] [--json] [--all] [--no-values] [--exit-code]
+envlens sync [PATH] [--dry-run]
 ```
+
+## Shell completions
+
+Generate a completion script for your shell:
+
+```sh
+envlens completions zsh  > ~/.zsh/completions/_envlens
+envlens completions bash > /etc/bash_completion.d/envlens
+envlens completions fish > ~/.config/fish/completions/envlens.fish
+```
+
+Supported shells: `bash`, `zsh`, `fish`, `powershell`, `elvish`.
 
 ## Keybindings
 
