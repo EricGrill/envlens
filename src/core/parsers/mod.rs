@@ -5,6 +5,8 @@
 
 pub mod ci;
 pub mod compose;
+pub mod direnv;
+pub mod dockerfile;
 pub mod dotenv;
 pub mod package_json;
 pub mod process;
@@ -134,6 +136,46 @@ pub fn occurrences_from_scripts(
 /// Map CI env/variables entries into occurrences. CI sources are
 /// informational in v0.1; the resolver excludes them from effective values.
 pub fn occurrences_from_ci(
+    source_id: &str,
+    entries: Vec<(String, String, Option<u32>)>,
+) -> Vec<VariableOccurrence> {
+    entries
+        .into_iter()
+        .map(|(key, value, line)| {
+            let is_empty = value.is_empty();
+            VariableOccurrence {
+                key,
+                raw_value: Some(value.clone()),
+                parsed_value: Some(value),
+                source_id: source_id.to_string(),
+                line,
+                is_empty,
+                is_inherited: false,
+                no_expand: false,
+                secret: SecretClass::None,
+            }
+        })
+        .collect()
+}
+
+/// Map Dockerfile `ENV`/`ARG` assignments into occurrences.
+pub fn occurrences_from_dockerfile(
+    source_id: &str,
+    entries: Vec<dockerfile::DockerfileEntry>,
+) -> Vec<VariableOccurrence> {
+    key_value_occurrences(source_id, entries)
+}
+
+/// Map direnv `.envrc` literal assignments into occurrences.
+pub fn occurrences_from_direnv(
+    source_id: &str,
+    entries: Vec<direnv::DirenvEntry>,
+) -> Vec<VariableOccurrence> {
+    key_value_occurrences(source_id, entries)
+}
+
+/// Shared mapping for the plain `(key, value, line)` occurrence shape.
+fn key_value_occurrences(
     source_id: &str,
     entries: Vec<(String, String, Option<u32>)>,
 ) -> Vec<VariableOccurrence> {

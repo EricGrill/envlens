@@ -42,6 +42,48 @@ pub enum Command {
         #[arg(long)]
         no_values: bool,
     },
+    /// Compare the effective environment of two profiles or two sources.
+    Diff {
+        /// Left source token (source id or file path). Omit when using
+        /// `--left-profile`.
+        left: Option<String>,
+        /// Right source token (source id or file path). Omit when using
+        /// `--right-profile`.
+        right: Option<String>,
+        /// Project root to analyze (defaults to the global path or `.`).
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// Resolve the left side using this profile instead of a source token.
+        #[arg(long)]
+        left_profile: Option<String>,
+        /// Resolve the right side using this profile instead of a source token.
+        #[arg(long)]
+        right_profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+        /// Include unchanged keys in the output.
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        no_values: bool,
+        /// Exit non-zero (1) when any difference is found.
+        #[arg(long)]
+        exit_code: bool,
+    },
+    /// Scaffold keys present in `.env*` files into example templates,
+    /// with their values stripped.
+    Sync {
+        path: Option<PathBuf>,
+        /// Show what would change without writing anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Print a shell completion script to stdout.
+    Completions {
+        /// Target shell (bash, zsh, fish, powershell, elvish).
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

@@ -4,6 +4,8 @@
 pub mod cli;
 pub mod config;
 pub mod core;
+pub mod diff;
 pub mod git;
 pub mod report;
+pub mod sync;
 pub mod tui;

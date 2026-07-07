@@ -767,3 +767,135 @@ fn assert_no_value_keys(value: &Value) {
         _ => {}
     }
 }
+
+#[test]
+fn completions_emit_scripts_for_each_shell() {
+    // bash/zsh/fish each produce a non-empty completion script mentioning the
+    // binary name; the subcommand exits 0.
+    for shell in ["bash", "zsh", "fish"] {
+        cmd()
+            .args(["completions", shell])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("envlens"));
+    }
+}
+
+#[test]
+fn completions_reject_unknown_shell() {
+    cmd().args(["completions", "tcsh"]).assert().code(2);
+}
+
+#[test]
+fn diff_sources_masks_secrets_and_reports_changes() {
+    cmd()
+        .args([
+            "diff",
+            ".env",
+            ".env.local",
+            "--path",
+            "tests/fixtures/basic",
+            "--no-color",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("PORT = 3000 -> 5001"))
+        // STRIPE_API_KEY is secret-like: masked, never printed raw.
+        .stdout(predicate::str::contains("STRIPE_API_KEY"))
+        .stdout(predicate::str::contains("•"));
+}
+
+#[test]
+fn diff_exit_code_flag_signals_differences() {
+    cmd()
+        .args([
+            "diff",
+            ".env",
+            ".env.local",
+            "--path",
+            "tests/fixtures/basic",
+            "--exit-code",
+        ])
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn diff_by_profile() {
+    cmd()
+        .args([
+            "diff",
+            "--left-profile",
+            "dev",
+            "--right-profile",
+            "production",
+            "--path",
+            "tests/fixtures/basic",
+            "--no-color",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--- dev (left)"))
+        .stdout(predicate::str::contains("+++ production (right)"));
+}
+
+#[test]
+fn diff_single_profile_is_usage_error() {
+    cmd()
+        .args([
+            "diff",
+            "--left-profile",
+            "dev",
+            "--path",
+            "tests/fixtures/basic",
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("requires both"));
+}
+
+#[test]
+fn diff_unknown_source_token_exits_2() {
+    cmd()
+        .args(["diff", ".env", "nope", "--path", "tests/fixtures/basic"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("unknown source"));
+}
+
+#[test]
+fn sync_dry_run_does_not_write() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let root = dir.path();
+    fs::write(root.join(".env"), "A=1\nB=2\n").expect("write .env");
+
+    cmd()
+        .args(["sync", root.to_str().expect("utf8"), "--dry-run"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("would create"));
+
+    assert!(!root.join(".env.example").exists());
+}
+
+#[test]
+fn sync_writes_missing_keys_stripped() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let root = dir.path();
+    fs::write(
+        root.join(".env"),
+        "API_URL=http://x\nTOKEN=supersecretvalue1\n",
+    )
+    .expect("write .env");
+    fs::write(root.join(".env.example"), "API_URL=\n").expect("write example");
+
+    cmd()
+        .args(["sync", root.to_str().expect("utf8")])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("updated"));
+
+    let example = fs::read_to_string(root.join(".env.example")).expect("read example");
+    assert!(example.contains("TOKEN=\n"));
+    assert!(!example.contains("supersecretvalue1"));
+}

@@ -62,6 +62,8 @@ fn kind_label(kind: SourceKind) -> &'static str {
     match kind {
         SourceKind::Dotenv => "env",
         SourceKind::DotenvExample => "req",
+        SourceKind::Direnv => "rc",
+        SourceKind::Dockerfile => "dkr",
         SourceKind::Compose => "cmp",
         SourceKind::PackageScript => "pkg",
         SourceKind::Manifest => "man",

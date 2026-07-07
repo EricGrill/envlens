@@ -162,6 +162,28 @@ pub fn analyze(
                     errors,
                 ));
             }
+            SourceKind::Dockerfile => {
+                let entries = parsers::dockerfile::parse(&content);
+                occurrences.extend(parsers::occurrences_from_dockerfile(&source_id, entries));
+                sources.push(source(
+                    source_id,
+                    SourceKind::Dockerfile,
+                    Some(discovered.rel_path),
+                    None,
+                    Vec::new(),
+                ));
+            }
+            SourceKind::Direnv => {
+                let entries = parsers::direnv::parse(&content);
+                occurrences.extend(parsers::occurrences_from_direnv(&source_id, entries));
+                sources.push(source(
+                    source_id,
+                    SourceKind::Direnv,
+                    Some(discovered.rel_path),
+                    None,
+                    Vec::new(),
+                ));
+            }
             SourceKind::Manifest => {
                 sources.push(source(
                     source_id,
@@ -405,6 +427,42 @@ mod tests {
         assert!(analysis.diagnostics.iter().any(|diagnostic| diagnostic.code
             == DiagnosticCode::ConflictingValues
             && diagnostic.key.as_deref() == Some("PORT")));
+    }
+
+    #[test]
+    fn analyze_discovers_dockerfile_and_direnv() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let root = dir.path();
+        fs::write(
+            root.join("Dockerfile"),
+            "FROM rust:1\nENV NODE_ENV=production\nARG BUILD_ID=42\n",
+        )
+        .expect("write Dockerfile");
+        fs::write(
+            root.join(".envrc"),
+            "layout python\nexport DIRENV_ONLY=yes\n",
+        )
+        .expect("write .envrc");
+
+        let analysis = analyze(root, &Config::default(), None, None, empty_external()).unwrap();
+
+        let kinds: BTreeSet<SourceKind> =
+            analysis.sources.iter().map(|source| source.kind).collect();
+        assert!(kinds.contains(&SourceKind::Dockerfile));
+        assert!(kinds.contains(&SourceKind::Direnv));
+
+        assert_eq!(
+            variable(&analysis, "NODE_ENV").effective.as_ref(),
+            Some(&("production".to_string(), "Dockerfile".to_string()))
+        );
+        assert_eq!(
+            variable(&analysis, "BUILD_ID").effective.as_ref(),
+            Some(&("42".to_string(), "Dockerfile".to_string()))
+        );
+        assert_eq!(
+            variable(&analysis, "DIRENV_ONLY").effective.as_ref(),
+            Some(&("yes".to_string(), ".envrc".to_string()))
+        );
     }
 
     #[test]

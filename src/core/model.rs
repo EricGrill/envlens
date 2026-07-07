@@ -13,6 +13,12 @@ pub type SourceId = String;
 pub enum SourceKind {
     Dotenv,
     DotenvExample,
+    /// direnv `.envrc`: `export KEY=value` / `KEY=value` literal assignments.
+    /// Non-literal shell lines (command substitution, `PATH_add`, `layout`,
+    /// etc.) are skipped without error.
+    Direnv,
+    /// `Dockerfile` `ENV`/`ARG` instructions.
+    Dockerfile,
     Compose,
     PackageScript,
     /// `pnpm-workspace.yaml` / `turbo.json` / `nx.json`: discovered and listed
