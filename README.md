@@ -141,8 +141,7 @@ EnvLens discovers the first project config found in this order:
 2. `.envlens.yaml`
 3. `.config/envlens.yml`
 
-It also merges user config from `~/.config/envlens/config.yml` underneath project config. Project keys override user keys; lists replace rather than concatenate. `--config FILE` bypasses discovery.
-
+It also merges user config underneath project config, resolved from `$XDG_CONFIG_HOME/envlens/config.yml` when `XDG_CONFIG_HOME` is set and `~/.config/envlens/config.yml` otherwise. Project keys override user keys; lists replace rather than concatenate. `--config FILE` bypasses discovery.
 ```yaml
 ignore: [tmp, generated]                # Extra directory names to skip while scanning.
 required: [DATABASE_URL, NODE_ENV]      # Required variables in addition to example files.
