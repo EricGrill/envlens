@@ -1,6 +1,7 @@
 use crate::core::model::{Analysis, Diagnostic, DiagnosticCode, Severity, VariableSummary};
 use crate::report::{
-    count_severity, diagnostic_code_name, diagnostic_message, masked_value, sanitize_text,
+    analysis_source_ids, count_severity, diagnostic_code_name, diagnostic_message, masked_value,
+    sanitize_text,
 };
 
 pub fn render(analysis: &Analysis, generated_at: impl AsRef<str>, no_values: bool) -> String {
@@ -56,6 +57,7 @@ fn render_diagnostic_section(
     no_values: bool,
 ) {
     output.push_str(&format!("## {title}\n\n"));
+    let source_ids = analysis_source_ids(analysis);
     let diagnostics: Vec<_> = analysis
         .diagnostics
         .iter()
@@ -80,7 +82,7 @@ fn render_diagnostic_section(
         ));
         output.push_str(&format!(
             "{}\n\n",
-            diagnostic_markdown_message(diagnostic, no_values)
+            diagnostic_markdown_message(diagnostic, no_values, &source_ids)
         ));
 
         if let Some(variable) = diagnostic
@@ -93,7 +95,11 @@ fn render_diagnostic_section(
     }
 }
 
-fn diagnostic_markdown_message(diagnostic: &Diagnostic, no_values: bool) -> String {
+fn diagnostic_markdown_message(
+    diagnostic: &Diagnostic,
+    no_values: bool,
+    source_ids: &[String],
+) -> String {
     match diagnostic.code {
         DiagnosticCode::MissingRequired => diagnostic
             .key
@@ -104,8 +110,8 @@ fn diagnostic_markdown_message(diagnostic: &Diagnostic, no_values: bool) -> Stri
                     sanitize_text(key)
                 )
             })
-            .unwrap_or_else(|| diagnostic_message(diagnostic, no_values)),
-        _ => diagnostic_message(diagnostic, no_values),
+            .unwrap_or_else(|| diagnostic_message(diagnostic, no_values, source_ids)),
+        _ => diagnostic_message(diagnostic, no_values, source_ids),
     }
 }
 

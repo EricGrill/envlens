@@ -2,8 +2,8 @@ use serde::Serialize;
 
 use crate::core::model::{Analysis, Diagnostic, EnvSource, ParseError, VariableOccurrence};
 use crate::report::{
-    count_severity, diagnostic_code_name, diagnostic_message, masked_value, sanitize_text,
-    secret_class_name, severity_name, source_kind_name,
+    analysis_source_ids, count_severity, diagnostic_code_name, diagnostic_message, masked_value,
+    sanitize_text, secret_class_name, severity_name, source_kind_name,
 };
 
 #[derive(Serialize)]
@@ -93,6 +93,7 @@ pub fn render(
     generated_at: impl Into<String>,
     no_values: bool,
 ) -> Result<String, serde_json::Error> {
+    let source_ids = analysis_source_ids(analysis);
     let report = Report {
         version: 1,
         generated_at: generated_at.into(),
@@ -152,7 +153,7 @@ pub fn render(
                     diagnostics: variable
                         .diagnostics
                         .iter()
-                        .map(|diagnostic| diagnostic_json(diagnostic, no_values))
+                        .map(|diagnostic| diagnostic_json(diagnostic, no_values, &source_ids))
                         .collect(),
                 }
             })
@@ -160,7 +161,7 @@ pub fn render(
         diagnostics: analysis
             .diagnostics
             .iter()
-            .map(|diagnostic| diagnostic_json(diagnostic, no_values))
+            .map(|diagnostic| diagnostic_json(diagnostic, no_values, &source_ids))
             .collect(),
     };
 
@@ -229,11 +230,15 @@ fn occurrence_json(
     }
 }
 
-fn diagnostic_json(diagnostic: &Diagnostic, no_values: bool) -> DiagnosticEntry {
+fn diagnostic_json(
+    diagnostic: &Diagnostic,
+    no_values: bool,
+    source_ids: &[String],
+) -> DiagnosticEntry {
     DiagnosticEntry {
         severity: severity_name(diagnostic.severity),
         code: diagnostic_code_name(diagnostic.code),
-        message: diagnostic_message(diagnostic, no_values),
+        message: diagnostic_message(diagnostic, no_values, source_ids),
         key: diagnostic.key.clone(),
         source_id: diagnostic.source_id.clone(),
         line: diagnostic.line,
